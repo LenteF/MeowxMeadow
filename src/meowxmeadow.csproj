@@ -1,0 +1,70 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>meowxmeadow</AssemblyName>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(MSBuildProjectDirectory)\..\meowxmeadow\plugins\</OutputPath>
+    <PathMap>$(MSBuildProjectDirectory)=/$(SolutionName)</PathMap>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+<ItemGroup>
+  <Reference Include="Assembly-CSharp">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\utils\PUBLIC-Assembly-CSharp.dll</HintPath>
+  </Reference>
+  <Reference Include="BepInEx">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\core\BepInEx.dll</HintPath>
+  </Reference>
+  <Reference Include="com.rlabrecque.steamworks.net">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\com.rlabrecque.steamworks.net.dll</HintPath>
+  </Reference>
+  <Reference Include="HOOKS-Assembly-CSharp">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\plugins\HOOKS-Assembly-CSharp.dll</HintPath>
+  </Reference>
+  <Reference Include="ImprovedInput">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3458119961\plugins\ImprovedInput.dll</HintPath>
+  </Reference>
+  <Reference Include="MonoMod.RuntimeDetour">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\core\MonoMod.RuntimeDetour.dll</HintPath>
+  </Reference>
+  <Reference Include="PushToMeowMod">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3257541402\plugins\PushToMeowMod.dll</HintPath>
+  </Reference>
+  <Reference Include="Rain Meadow">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3388224007\plugins\Rain Meadow.dll</HintPath>
+  </Reference>
+  <Reference Include="UnityEngine">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\UnityEngine.dll</HintPath>
+  </Reference>
+  <Reference Include="UnityEngine.CoreModule">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+  </Reference>
+</ItemGroup>
+
+  <Target Name="GenerateMod" AfterTargets="Build">
+    <ItemGroup>
+      <RemovePlugins Include="$(OutputPath)*.dll" Exclude="$(OutputPath)meowxmeadow.dll" />
+	  <RemovePlugins Include="$(OutputPath)*.dll.config" />
+      <RemovePlugins Include="$(OutputPath)*.pdb" />
+	  <RemovePlugins Include="$(OutputPath)*.xml" />
+    </ItemGroup>
+    <Delete Files="@(RemovePlugins)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,23 @@
+{
+  "id": "meowxmeadow",
+  "name": "MeowxMeadow",
+  "version": "1.0.0",
+  "hide_version": false,
+  "authors": "lente",
+  "description": "",
+  "requirements": [
+    "henpemaz_rainmeadow",
+    "pushtomeow"
+  ],
+  "requirements_names": [
+    "Rain Meadow",
+    "Push To Meow"
+  ],
+  "checksum_override_version": false,
+  "tags": [
+    "Tools",
+    "Dependency",
+    "Game Modes",
+    "Game Mechanics"
+  ]
+}
