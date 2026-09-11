@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.1.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.1.1")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     public class Plugin : BaseUnityPlugin
@@ -59,7 +59,7 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Plugin.Logger.LogInfo("Build 1.1.0 (11/09/2026: asignación de sonidos manual con .txt). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Plugin.Logger.LogInfo("Build 1.1.1 (11/09/2026: asignación de sonidos manual con .txt, mejor limpieza de diccionarios). Si NO ves esta línea, se está cargando un DLL viejo.");
 
                 InitializeHooks();
 
@@ -240,6 +240,14 @@ namespace MeowxMeadow
                 if (!Instance.OnlinePlayersMeowingState.ContainsKey(steamId))
                 {
                     Instance.OnlinePlayersMeowingState.Add(steamId, MeowState.NotMeowed);
+                }
+
+                if (Instance.OnlinePlayersLookup.TryGetValue(steamId, out Player oldPlayer) && oldPlayer != player)
+                {
+                    if (oldPlayer != null)
+                    {
+                        Instance.OnlinePlayerToKeyLookup.Remove(oldPlayer);
+                    }
                 }
 
                 // Guardar mapeos en diccionarios
