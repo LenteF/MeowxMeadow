@@ -5,6 +5,9 @@ using System.Collections.Generic;
 
 namespace MeowxMeadow
 {
+    /// <summary>
+    /// Enumeración en máscara de bits (Flags) para empaquetar y transferir las reglas de juego Remix en un entero.
+    /// </summary>
     [Flags]
     public enum MeowRuleFlags
     {
@@ -20,12 +23,19 @@ namespace MeowxMeadow
         SlugpupStunBlunt    = 1 << 8
     }
 
+    /// <summary>
+    /// Sincroniza las opciones del menú Remix de PushToMeow con la sala multijugador.
+    /// Permite que la configuración del Host invalide temporalmente las preferencias locales de los clientes.
+    /// </summary>
     public class MeowxMeadowOptions
     {
         public static MeowxMeadowOptions Instance { get; } = new MeowxMeadowOptions();
         private MeowRuleFlags _localCache = MeowRuleFlags.None;
         public bool IsUsingRemoteFlags { get; private set; } = false;
 
+        /// <summary>
+        /// Hook que empaqueta los booleanos de configuración del Host dentro de un único entero (bits) enviándolo al lobby.
+        /// </summary>
         private static (Dictionary<string, bool> hostBoolSettings, Dictionary<string, float> hostFloatSettings, Dictionary<string, int> hostIntSettings) OnlineGameMode_GetHostRemixSettings(Func<OnlineGameMode, (Dictionary<string, bool> hostBoolSettings, Dictionary<string, float> hostFloatSettings, Dictionary<string, int> hostIntSettings)> orig, OnlineGameMode mode)
         {
             var result = orig(mode);
@@ -43,6 +53,9 @@ namespace MeowxMeadow
             return result;
         }
 
+        /// <summary>
+        /// Convierte las opciones actuales del mod PushToMeow en una representación de bits de <see cref="MeowRuleFlags"/>.
+        /// </summary>
         private MeowRuleFlags CaptureLocalFlags()
         {
             MeowRuleFlags state = MeowRuleFlags.None;
@@ -60,6 +73,9 @@ namespace MeowxMeadow
             return state;
         }
 
+        /// <summary>
+        /// Aplica las reglas enviadas por el Host al cliente actual. Guarda una copia local para su posterior restauración.
+        /// </summary>
         public void ApplyRemoteFlags(MeowRuleFlags remoteFlags)
         {
             _localCache = CaptureLocalFlags();
@@ -70,6 +86,9 @@ namespace MeowxMeadow
             Plugin.Logger.LogInfo($"Configuración del Host aplicada correctamente: {remoteFlags}");
         }
 
+        /// <summary>
+        /// Restaura la configuración Remix personal del jugador al desconectarse de la sala online.
+        /// </summary>
         public void RestoreLocalState()
         {
             if (!IsUsingRemoteFlags) return;
@@ -80,6 +99,9 @@ namespace MeowxMeadow
             Plugin.Logger.LogInfo("Configuración local restaurada.");
         }
 
+        /// <summary>
+        /// Escribe el estado de las flags de bits directamente en la memoria de los ModSettings de PushToMeow.
+        /// </summary>
         private void ApplyFlagsToSettings(MeowRuleFlags flags)
         {
             PushToMeowMain.ModSettings.AlertCreatures.Value         = flags.HasFlag(MeowRuleFlags.AlertCreatures);

@@ -4,10 +4,16 @@ using System;
 
 namespace MeowxMeadow
 {
+    /// <summary>
+    /// Gestiona la transmisión (RPC) y recepción de eventos de maullidos a través de la red de Rain Meadow.
+    /// </summary>
     public static class MeowSenderReceiver
     {
         private delegate void MeowRpcDelegate(OnlinePhysicalObject player, bool isShortMeow);
 
+        /// <summary>
+        /// Intercepta la llamada local de DoMeow. Si la entidad nos pertenece, emite la orden por RPC a los demás jugadores.
+        /// </summary>
         private static void PushToMeowMain_DoMeow(Action<PushToMeowMain, Player, bool> orig, PushToMeowMain self, Player player, bool isShortMeow)
         {
             orig(self, player, isShortMeow);
@@ -17,6 +23,7 @@ namespace MeowxMeadow
                 return;
             }
 
+            // Validar que el objeto pertenece al jugador local antes de transmitir por red
             if (OnlinePhysicalObject.map.TryGetValue(player.abstractPhysicalObject, out OnlinePhysicalObject onlinePlayer))
             {
                 if (onlinePlayer.isMine)
@@ -26,6 +33,9 @@ namespace MeowxMeadow
             }
         }
 
+        /// <summary>
+        /// Envía una llamada RPC (InvokeOnceRPC) a todos los jugadores de la sala excepto a nosotros mismos.
+        /// </summary>
         private static void BroadcastMeow(OnlinePhysicalObject onlinePlayer, bool isShortMeow)
         {
             try
@@ -44,6 +54,9 @@ namespace MeowxMeadow
             }
         }
 
+        /// <summary>
+        /// Método RPC receptor invocado de forma remota cuando otro jugador maulla en la sala.
+        /// </summary>
         [SoftRPCMethod]
         private static void ReceiveRemoteMeow(OnlinePhysicalObject onlinePlayer, bool isShortMeow)
         {

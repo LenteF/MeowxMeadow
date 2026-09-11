@@ -10,22 +10,28 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.0.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.1.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     public class Plugin : BaseUnityPlugin
     {
         public static Plugin Instance;
         public static new ManualLogSource Logger;
+
+        // --- DICCIONARIOS DE ESTADO ONLINE (STEAM ID -> DATO) ---
         public Dictionary<string, bool> OnlinePlayersMeowButtonLastState = new Dictionary<string, bool>();
         public Dictionary<string, MeowState> OnlinePlayersMeowingState = new Dictionary<string, MeowState>();
         public Dictionary<string, float> OnlinePlayersLastMeowTime = new Dictionary<string, float>();
         public Dictionary<string, Player> OnlinePlayersLookup = new Dictionary<string, Player>();
+        public Dictionary<Player, string> OnlinePlayerToKeyLookup = new Dictionary<Player, string>();
+
         private Hook LeaveLobbyHook;
         private Hook UpdateHook;
         private Hook HandleMeowInputHook;
         private Hook DoMeowHook;
+        private Hook FindMeowSoundIDHook;
         private Hook GetHostRemixSettingsHook;
+
         private bool isInit = false;
 
         public void Awake()
@@ -53,9 +59,12 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Plugin.Logger.LogInfo("Build 1.0.0. Si NO ves esta línea, se está cargando un DLL viejo.");
+                Plugin.Logger.LogInfo("Build 1.1.0 (11/09/2026: asignación de sonidos manual con .txt). Si NO ves esta línea, se está cargando un DLL viejo.");
 
                 InitializeHooks();
+
+                CustomMeowRegistry.LoadAllCustomMeows();
+                PlayerMeowProfileManager.LoadProfiles();
             }
             catch (Exception ex)
             {
@@ -75,7 +84,7 @@ namespace MeowxMeadow
                 if (leaveLobbyMethod != null && leaveLobbyHook != null)
                     this.LeaveLobbyHook = new Hook(leaveLobbyMethod, leaveLobbyHook);
 
-                    MethodInfo updateMethod = typeof(PushToMeowMain).GetMethod("Update", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo updateMethod = typeof(PushToMeowMain).GetMethod("Update", BindingFlags.Public | BindingFlags.Instance);
                 MethodInfo updateHook = typeof(Plugin).GetMethod("PushToMeowMain_Update", BindingFlags.NonPublic | BindingFlags.Static);
                 if (updateMethod != null && updateHook != null)
                     this.UpdateHook = new Hook(updateMethod, updateHook);
@@ -88,7 +97,12 @@ namespace MeowxMeadow
                 MethodInfo doMeowMethod = typeof(PushToMeowMain).GetMethod("DoMeow", BindingFlags.Public | BindingFlags.Instance);
                 MethodInfo doMeowHook = typeof(MeowSenderReceiver).GetMethod("PushToMeowMain_DoMeow", BindingFlags.NonPublic | BindingFlags.Static);
                 if (doMeowMethod != null && doMeowHook != null)
-                    DoMeowHook = new Hook(doMeowMethod, doMeowHook);
+                    this.DoMeowHook = new Hook(doMeowMethod, doMeowHook);
+
+                MethodInfo findMeowSoundIDMethod = typeof(MeowUtils).GetMethod("FindMeowSoundID", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo findMeowSoundIDHook = typeof(PlayerMeowProfileManager).GetMethod("MeowUtils_FindMeowSoundID", BindingFlags.NonPublic | BindingFlags.Static);
+                if (findMeowSoundIDMethod != null && findMeowSoundIDHook != null)
+                    this.FindMeowSoundIDHook = new Hook(findMeowSoundIDMethod, findMeowSoundIDHook);
 
                 MethodInfo getHostRemixSettingsMethod = typeof(OnlineGameMode).GetMethod("GetHostRemixSettings", BindingFlags.Public | BindingFlags.Static);
                 MethodInfo getHostRemixSettingsHook = typeof(MeowxMeadowOptions).GetMethod("OnlineGameMode_GetHostRemixSettings", BindingFlags.NonPublic | BindingFlags.Static);
@@ -108,9 +122,13 @@ namespace MeowxMeadow
                 return;
             }
 
+            // Iniciar corrutina de espera para descargar y aplicar las reglas del Host
             Instance.StartCoroutine(TrySyncHostOptions());
         }
 
+        /// <summary>
+        /// Corrutina que intenta durante 5 segundos leer los datos comprimidos (bits) de configuración del Host.
+        /// </summary>
         public static System.Collections.IEnumerator TrySyncHostOptions()
         {
             float timeout = 5f;
@@ -141,6 +159,9 @@ namespace MeowxMeadow
             }
         }
 
+        /// <summary>
+        /// Restaura la configuración Remix local del jugador al abandonar la sala multijugador.
+        /// </summary>
         private static void OnlineManager_LeaveLobby(Action orig)
         {
             orig();
@@ -174,6 +195,7 @@ namespace MeowxMeadow
 
                 float timeDiff = Time.time - lastTime;
 
+                // Si lleva más de 0.14s presionado, emitir maullido largo
                 if (isPressed && timeDiff > 0.14f && meowState == MeowState.NotMeowed)
                 {
                     self.DoMeow(player);
@@ -204,6 +226,7 @@ namespace MeowxMeadow
                 string steamId = GetPlayerSteamId(onlinePlayer);
                 if (string.IsNullOrEmpty(steamId)) return;
 
+                // Inicializar entradas del jugador si es la primera vez que se detecta en la sala
                 if (!Instance.OnlinePlayersMeowButtonLastState.ContainsKey(steamId))
                 {
                     Instance.OnlinePlayersMeowButtonLastState.Add(steamId, value: false);
@@ -219,7 +242,9 @@ namespace MeowxMeadow
                     Instance.OnlinePlayersMeowingState.Add(steamId, MeowState.NotMeowed);
                 }
 
+                // Guardar mapeos en diccionarios
                 Instance.OnlinePlayersLookup[steamId] = player;
+                Instance.OnlinePlayerToKeyLookup[player] = steamId;
 
                 bool isKeyPressed = false;
 
@@ -232,6 +257,7 @@ namespace MeowxMeadow
                 float lastMeowTime = Instance.OnlinePlayersLastMeowTime[steamId];
                 MeowState currentState = Instance.OnlinePlayersMeowingState[steamId];
 
+                // Detección de pulsación rápida vs mantenida
                 if (isKeyPressed && !lastState)
                 {
                     if (Time.time - lastMeowTime >= 0.24f)
@@ -243,6 +269,7 @@ namespace MeowxMeadow
                 }
                 else if (!isKeyPressed && lastState)
                 {
+                    // Si se soltó en menos de 0.14s, emitir maullido corto
                     if (Time.time - lastMeowTime <= 0.14f && currentState == MeowState.NotMeowed)
                     {
                         self.DoMeow(player, isShortMeow: true);
@@ -258,6 +285,9 @@ namespace MeowxMeadow
             }
         }
 
+        /// <summary>
+        /// Helper para extraer el identificador SteamID64 de un OnlinePlayer de Rain Meadow.
+        /// </summary>
         public static string GetPlayerSteamId(OnlinePlayer player)
         {
             if (player?.id == null) return string.Empty;
@@ -274,11 +304,15 @@ namespace MeowxMeadow
             OnlinePlayersMeowingState.Clear();
             OnlinePlayersLastMeowTime.Clear();
             OnlinePlayersLookup.Clear();
+            OnlinePlayerToKeyLookup.Clear();
+
+            PlayerMeowProfileManager.Profiles.Clear();
 
             LeaveLobbyHook?.Dispose();
             UpdateHook?.Dispose();
             HandleMeowInputHook?.Dispose();
             DoMeowHook?.Dispose();
+            FindMeowSoundIDHook?.Dispose();
             GetHostRemixSettingsHook?.Dispose();
         }
     }
