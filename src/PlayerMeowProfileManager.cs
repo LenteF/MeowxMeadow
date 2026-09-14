@@ -21,6 +21,7 @@ namespace MeowxMeadow
         /// Clave: (SteamID, SlugCatClass) -> Valor: ModID del paquete de audio.
         /// </summary>
         public static Dictionary<(string SteamId, string SlugCatClass), string> Profiles = new Dictionary<(string SteamId, string SlugCatClass), string>();
+        public static Dictionary<(string SteamId, string SlugCatClass), string> RemoteProfiles = new Dictionary<(string SteamId, string SlugCatClass), string>();
 
         /// <summary>
         /// Lee el archivo `.txt` de configuración y registra cada perfil de jugador en el diccionario.
@@ -105,15 +106,15 @@ namespace MeowxMeadow
             if (Plugin.Instance.OnlinePlayerToKeyLookup.TryGetValue(self, out string playerSteamId) && !string.IsNullOrEmpty(playerSteamId))
             {
                 string slugCatClass = self.SlugCatClass.value;
-                var key = (SteamId: playerSteamId, SlugCatClass: slugCatClass);
 
                 // 2. Buscar si el jugador tiene una asignación registrada para esta clase de Slugcat
-                if (Profiles.TryGetValue(key, out string assignedModId))
+                string assignedModId = GetEffectiveModId(playerSteamId, slugCatClass);
+                if (!string.IsNullOrEmpty(assignedModId))
                 {
                     // Formato clave global de PushToMeow: "ModID:SlugCatClass"
                     string targetRegistryKey = $"{assignedModId}:{slugCatClass}";
 
-                    if (CustomMeowRegistry.AllCustomMeows.TryGetValue(targetRegistryKey, out CustomMeow meow))
+                    if (MeowRegistration.AllCustomMeows.TryGetValue(targetRegistryKey, out CustomMeow meow))
                     {
                         Plugin.Logger.LogDebug($"Maullido personalizado encontrado para {playerSteamId} ({slugCatClass}) -> Key: {targetRegistryKey}");
 
@@ -165,6 +166,32 @@ namespace MeowxMeadow
 
             // Fallback general: Si no hay perfil registrado, ejecutar comportamiento original
             return orig(self, isShortMeow);
+        }
+
+        private static string GetEffectiveModId(string steamId, string slugcatClass)
+        {
+            var key = (SteamId: steamId, SlugCatClass: slugcatClass);
+
+            // Prioridad 1: Override manual definido por el usuario local en la UI
+            if (PlayerMeowProfileManager.Profiles.TryGetValue(key, out var manualModId))
+            {
+                return manualModId;
+            }
+
+            // Prioridad 2: El perfil remoto recibido dinámicamente por Handshake
+            if (PlayerMeowProfileManager.RemoteProfiles.TryGetValue(key, out var remoteModId))
+            {
+                return remoteModId;
+            }
+
+            // Prioridad 3: Fallback nativo
+            return null;
+        }
+
+        public static void ClearAll()
+        {
+            Profiles.Clear();
+            RemoteProfiles.Clear();
         }
     }
 }
