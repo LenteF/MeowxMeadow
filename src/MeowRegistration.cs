@@ -336,47 +336,26 @@ namespace MeowxMeadow
                 List<SoundLoader.SoundPlayInstruction> instructions = new List<SoundLoader.SoundPlayInstruction>();
 
                 // -------------------------------------------------------------------------
-                // PASO 1: Inyectar cada variación .wav/.ogg en allAudio[] (ClipLoadData)
+                // PASO 1: Inyectar en lote en allAudio[]
                 // -------------------------------------------------------------------------
+                Dictionary<string, int> existingClipsByName = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int i = 0; i < soundLoader.allAudio.Length; i++)
+                {
+                    SoundLoader.ClipLoadData audioData = soundLoader.allAudio[i];
+                    if (!string.IsNullOrEmpty(audioData.name) && !existingClipsByName.ContainsKey(audioData.name))
+                    {
+                        existingClipsByName[audioData.name] = i;
+                    }
+                }
+
+                List<SoundLoader.ClipLoadData> newClipsToInject = new List<SoundLoader.ClipLoadData>();
+                int startIndexForNewClips = soundLoader.allAudio.Length;
+
                 foreach (string filePath in audioFilePaths)
                 {
                     if (!File.Exists(filePath)) continue;
 
                     string sampleName = Path.GetFileNameWithoutExtension(filePath);
-                    int clipIndex = -1;
-
-                    // Comprobar si la muestra individual ya existe en allAudio
-                    for (int i = 0; i < soundLoader.allAudio.Length; i++)
-                    {
-                        if (soundLoader.allAudio[i].name == sampleName)
-                        {
-                            clipIndex = i;
-                            break;
-                        }
-                    }
-
-                    // Si no existe, redimensionar allAudio e inyectar
-                    if (clipIndex == -1)
-                    {
-                        clipIndex = soundLoader.allAudio.Length;
-                        Array.Resize(ref soundLoader.allAudio, clipIndex + 1);
-
-                        AudioType audioType = filePath.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)
-                            ? AudioType.OGGVORBIS
-                            : AudioType.WAV;
-
-                        AudioClip loadedClip = AssetManager.SafeWWWAudioClip("file://" + filePath, threeD: false, stream: true, audioType);
-
-                        soundLoader.allAudio[clipIndex] = new SoundLoader.ClipLoadData
-                        {
-                            name = sampleName,
-                            audioClipThroughUnity = true,
-                            unityAudioCached = true,
-                            audio = new AudioClip[] { loadedClip }
-                        };
-
-                        Plugin.Logger.LogInfo($"🔊 ClipLoadData '{sampleName}' inyectado en allAudio[{clipIndex}]");
-                    }
 
                     string[] sampleInit;
                     if (sampleParamsDict != null && sampleParamsDict.TryGetValue(sampleName, out string[] customParams))
@@ -388,6 +367,35 @@ namespace MeowxMeadow
                         sampleInit = new string[] { sampleName, "vol=1", "pitch=1" };
                     }
 
+                    int clipIndex;
+
+                    // Comprobar si la muestra individual ya existe en allAudio
+                    if (existingClipsByName.TryGetValue(sampleName, out int existingIndex))
+                    {
+                        clipIndex = existingIndex;
+                    }
+                    else
+                    {
+                        AudioType audioType = filePath.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)
+                            ? AudioType.OGGVORBIS
+                            : AudioType.WAV;
+
+                        AudioClip loadedClip = AssetManager.SafeWWWAudioClip("file://" + filePath, threeD: false, stream: true, audioType);
+
+                        SoundLoader.ClipLoadData newClipData = new SoundLoader.ClipLoadData
+                        {
+                            name = sampleName,
+                            audioClipThroughUnity = true,
+                            unityAudioCached = true,
+                            audio = new AudioClip[] { loadedClip }
+                        };
+
+                        clipIndex = startIndexForNewClips + newClipsToInject.Count;
+
+                        existingClipsByName[sampleName] = clipIndex;
+                        newClipsToInject.Add(newClipData);
+                    }
+
                     instructions.Add(new SoundLoader.SoundPlayInstruction(clipIndex, sampleInit));
                 }
 
@@ -395,6 +403,21 @@ namespace MeowxMeadow
                 {
                     Plugin.Logger.LogError($"[InjectDynamicAudio] No se pudo cargar ningún archivo de audio válido para '{soundId.value}'.");
                     return false;
+                }
+
+                if (newClipsToInject.Count > 0)
+                {
+                    int oldLength = soundLoader.allAudio.Length;
+                    int newLength = oldLength + newClipsToInject.Count;
+
+                    Array.Resize(ref soundLoader.allAudio, newLength);
+
+                    for (int i = 0; i < newClipsToInject.Count; i++)
+                    {
+                        soundLoader.allAudio[oldLength + i] = newClipsToInject[i];
+                    }
+
+                    Plugin.Logger.LogInfo($"🔊 Inyectados {newClipsToInject.Count} clips en allAudio[] (Tamaño total: {newLength}).");
                 }
 
                 // -------------------------------------------------------------------------

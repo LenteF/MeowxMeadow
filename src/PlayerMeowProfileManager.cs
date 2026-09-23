@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace MeowxMeadow
@@ -168,7 +169,7 @@ namespace MeowxMeadow
             return orig(self, isShortMeow);
         }
 
-        private static string GetEffectiveModId(string steamId, string slugcatClass)
+        public static string GetEffectiveModId(string steamId, string slugcatClass)
         {
             var key = (SteamId: steamId, SlugCatClass: slugcatClass);
 
@@ -186,6 +187,78 @@ namespace MeowxMeadow
 
             // Prioridad 3: Fallback nativo
             return null;
+        }
+
+        /// <summary>
+        /// Asigna un ModID de audio a un SteamID y SlugcatClass específicos, actualizando memoria y disco.
+        /// </summary>
+        public static void SaveProfile(string steamId, string modId, string slugcatClass)
+        {
+            if (string.IsNullOrEmpty(steamId) || string.IsNullOrEmpty(slugcatClass) || string.IsNullOrEmpty(modId))
+                return;
+
+            var key = (SteamId: steamId.Trim(), SlugCatClass: slugcatClass.Trim());
+            Profiles[key] = modId.Trim();
+
+            FlushProfilesToDisk();
+        }
+
+        /// <summary>
+        /// Elimina todas las entradas asociadas a un SteamID de la memoria local y actualiza el disco.
+        /// </summary>
+        public static void RemoveProfile(string steamId, string slugcatClass = null)
+        {
+            if (string.IsNullOrEmpty(steamId)) return;
+
+            if (slugcatClass == null)
+            {
+                var keysToRemove = Profiles.Keys.Where(k => k.SteamId.Equals(steamId.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+                if (keysToRemove.Count == 0) return;
+
+                foreach (var key in keysToRemove)
+                {
+                    Profiles.Remove(key);
+                }
+            }
+            else
+            {
+                Profiles.Remove((steamId, slugcatClass));
+            }
+
+            FlushProfilesToDisk();
+        }
+
+        /// <summary>
+        /// Reescribe el archivo meowxmeadow.txt preservando el formato obligatorio SteamID:ModID:SlugCatClass.
+        /// </summary>
+        private static void FlushProfilesToDisk()
+        {
+            try
+            {
+                if (!Directory.Exists(MeowRootPath))
+                {
+                    Directory.CreateDirectory(MeowRootPath);
+                }
+
+                List<string> lines = new List<string>
+                {
+                    "# MeowxMeadow Profile Assignments",
+                    "# Format: SteamID:ModID:SlugCatClass"
+                };
+
+                foreach (var kvp in Profiles)
+                {
+                    lines.Add($"{kvp.Key.SteamId}:{kvp.Value}:{kvp.Key.SlugCatClass}");
+                }
+
+                File.WriteAllLines(ProfilesFile, lines);
+                _lastProfilesWriteTime = File.GetLastWriteTime(ProfilesFile);
+                Plugin.Logger.LogInfo($"meowxmeadow.txt actualizado correctamente con {Profiles.Count} entradas.");
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"Error al guardar meowxmeadow.txt: {ex.Message}");
+            }
         }
 
         public static void ClearAll()
