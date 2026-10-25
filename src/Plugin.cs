@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.3.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.3.1")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     public class Plugin : BaseUnityPlugin
@@ -66,7 +66,7 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Plugin.Logger.LogInfo("Build 1.3.0 (14/09/2026: asignación de sonidos por red P2P, injección de sonidos en caliente durante la inicialización del juego). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Plugin.Logger.LogInfo("Build 1.3.1 (25/10/2026: optimización en la obtención de un SteamID por cada objeto Player). Si NO ves esta línea, se está cargando un DLL viejo.");
 
                 InitializeHooks();
 
@@ -403,8 +403,11 @@ namespace MeowxMeadow
                 OnlinePlayer onlinePlayer = onlinePhysicalObject.owner;
                 if (onlinePlayer == null) return;
 
-                string steamId = MeowSerializer.GetPlayerSteamId(onlinePlayer);
-                if (string.IsNullOrEmpty(steamId)) return;
+                if (!Instance.OnlinePlayerToKeyLookup.TryGetValue(player, out string steamId) || string.IsNullOrEmpty(steamId))
+                {
+                    steamId = MeowSerializer.GetPlayerSteamId(onlinePlayer);
+                    if (string.IsNullOrEmpty(steamId)) return;
+                }
 
                 // Inicializar entradas del jugador si es la primera vez que se detecta en la sala
                 if (!Instance.OnlinePlayersMeowButtonLastState.ContainsKey(steamId))
