@@ -34,6 +34,9 @@
   <Reference Include="com.rlabrecque.steamworks.net">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\com.rlabrecque.steamworks.net.dll</HintPath>
   </Reference>
+  <Reference Include="dmsxmeadow">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3772996588\plugins\dmsxmeadow.dll</HintPath>
+  </Reference>
   <Reference Include="HOOKS-Assembly-CSharp">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\plugins\HOOKS-Assembly-CSharp.dll</HintPath>
   </Reference>

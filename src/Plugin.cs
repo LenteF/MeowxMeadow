@@ -10,15 +10,14 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "1.3.1")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.0.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
+    [BepInDependency("dmsxmeadow", BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
         public static Plugin Instance;
         public static new ManualLogSource Logger;
-
-        public static SoundLoader ActiveSoundLoader { get; private set; }
 
         // --- DICCIONARIOS DE ESTADO ONLINE (STEAM ID -> DATO) ---
         public Dictionary<string, bool> OnlinePlayersMeowButtonLastState = new Dictionary<string, bool>();
@@ -27,8 +26,6 @@ namespace MeowxMeadow
         public Dictionary<string, Player> OnlinePlayersLookup = new Dictionary<string, Player>();
         public Dictionary<Player, string> OnlinePlayerToKeyLookup = new Dictionary<Player, string>();
 
-        private Hook HandleJoinHook;
-        private Hook HandleDisconnectHook;
         private Hook LeaveLobbyHook;
         private Hook UpdateHook;
         private Hook HandleMeowInputHook;
@@ -37,16 +34,17 @@ namespace MeowxMeadow
         private Hook GetHostRemixSettingsHook;
 
         private bool isInit = false;
+        public static bool IsDmsxMeadowActive { get; set; }
 
         public void Awake()
         {
             Instance = this;
             Logger = base.Logger;
+            IsDmsxMeadowActive = BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("dmsxmeadow");
 
             try
             {
                 On.RainWorld.OnModsInit += OnModsInit;
-                On.RainWorld.Update += RainWorld_Update;
             }
             catch (Exception ex)
             {
@@ -61,17 +59,14 @@ namespace MeowxMeadow
 
             try
             {
-                MeowRegistration.LoadAllActiveCustomMeows();
-
                 if (isInit) return;
                 isInit = true;
 
-                Plugin.Logger.LogInfo("Build 1.3.1 (25/10/2026: optimización en la obtención de un SteamID por cada objeto Player). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Plugin.Logger.LogInfo("Build 2.0.0 (14/11/2026: reestructuración y reescritura del sistema de asignación de sonidos a nivel local). Si NO ves esta línea, se está cargando un DLL viejo.");
+
+                MeowProfileManager.Load();
 
                 InitializeHooks();
-
-                PlayerMeowProfileManager.LoadProfiles();
-                MeowRegistration.LoadAllCustomMeows();
             }
             catch (Exception ex)
             {
@@ -84,21 +79,6 @@ namespace MeowxMeadow
         {
             try
             {
-                On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
-
-                On.RoomCamera.SpriteLeaser.ctor += SpriteLeaser_Ctor_Hook;
-
-                MethodInfo handleJoinMethod = typeof(MatchmakingManager).GetMethod("HandleJoin", BindingFlags.Public | BindingFlags.Instance);
-                MethodInfo handleJoinHook = typeof(Plugin).GetMethod("MatchmakingManager_HandleJoin", BindingFlags.NonPublic | BindingFlags.Static);
-                if (handleJoinMethod != null && handleJoinHook != null)
-                    this.HandleJoinHook = new Hook(handleJoinMethod, handleJoinHook);
-
-                MethodInfo handleDisconnectMethod = typeof(MatchmakingManager).GetMethod("HandleDisconnect", BindingFlags.Public | BindingFlags.Instance);
-                MethodInfo handleDisconnectHook = typeof(Plugin).GetMethod("MatchmakingManager_HandleDisconnect", BindingFlags.NonPublic | BindingFlags.Static);
-                if (handleDisconnectMethod != null && handleDisconnectHook != null)
-                    this.HandleDisconnectHook = new Hook(handleDisconnectMethod, handleDisconnectHook);
-
-
                 MatchmakingManager.OnLobbyJoined += MatchmakingManager_OnLobbyJoined;
 
                 MethodInfo leaveLobbyMethod = typeof(OnlineManager).GetMethod("LeaveLobby", BindingFlags.Public | BindingFlags.Static);
@@ -122,7 +102,7 @@ namespace MeowxMeadow
                     this.DoMeowHook = new Hook(doMeowMethod, doMeowHook);
 
                 MethodInfo findMeowSoundIDMethod = typeof(MeowUtils).GetMethod("FindMeowSoundID", BindingFlags.Public | BindingFlags.Static);
-                MethodInfo findMeowSoundIDHook = typeof(PlayerMeowProfileManager).GetMethod("MeowUtils_FindMeowSoundID", BindingFlags.NonPublic | BindingFlags.Static);
+                MethodInfo findMeowSoundIDHook = typeof(MeowProfileManager).GetMethod("MeowUtils_FindMeowSoundID", BindingFlags.NonPublic | BindingFlags.Static);
                 if (findMeowSoundIDMethod != null && findMeowSoundIDHook != null)
                     this.FindMeowSoundIDHook = new Hook(findMeowSoundIDMethod, findMeowSoundIDHook);
 
@@ -137,124 +117,6 @@ namespace MeowxMeadow
             }
         }
 
-        private static void SoundLoader_LoadSounds(On.SoundLoader.orig_LoadSounds orig, SoundLoader self)
-        {
-            orig(self);
-
-            ActiveSoundLoader = self;
-
-            if (self.allAudio != null && self.allAudio.Length > 0)
-            {
-                Logger.LogInfo("🔊 Guardada la referencia global a SoundLoader.");
-                MeowRegistration.InjectInactiveLocalMeows(self);
-            }
-        }
-
-        private static void SpriteLeaser_Ctor_Hook(On.RoomCamera.SpriteLeaser.orig_ctor orig, RoomCamera.SpriteLeaser sLeaser, IDrawable obj, RoomCamera rCam)
-        {
-            orig(sLeaser, obj, rCam);
-
-            try
-            {
-                if (obj is not PlayerGraphics playerGraphics) return;
-                if (playerGraphics?.player == null) return;
-
-                var onlineEntity = playerGraphics.player.abstractCreature.GetOnlineObject();
-                if (onlineEntity == null || !onlineEntity.isMine) return;
-
-                if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return;
-
-                string slugcatName = playerGraphics.player.slugcatStats.name.value;
-                MeowSerializer.BroadcastHandshake(slugcatName);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error en Hook SpriteLeaser_ctor (Meow): {ex.Message}");
-            }
-        }
-
-        private string LastEmittedLobbySlugcat = null;
-
-        private static bool RandomSlugcatSkipLogged = false;
-
-        internal static (string Slugcat, string Mode) ResolveLocalSlugcatName()
-        {
-            var currentMainLoop = RWCustom.Custom.rainWorld?.processManager?.currentMainLoop;
-
-            if (currentMainLoop is RainWorldGame rainWorldGame)
-            {
-                string realized = rainWorldGame.FirstRealizedPlayer?.slugcatStats.name.value;
-                return (realized, realized == null ? null : "partida");
-            }
-
-            if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return (null, null);
-
-            if (OnlineManager.lobby.gameMode is ArenaOnlineGameMode)
-            {
-                var playingAs = ArenaHelpers.GetArenaClientSettings(OnlineManager.mePlayer)?.playingAs;
-                if (playingAs == null || playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineRandomSlugcat || playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineOverseerSpectator)
-                {
-                    if (playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineRandomSlugcat && !RandomSlugcatSkipLogged)
-                    {
-                        RandomSlugcatSkipLogged = true;
-                    }
-                    return (null, "arena");
-                }
-                return (playingAs.value, "arena");
-            }
-
-            if (OnlineManager.lobby.gameMode is StoryGameMode storyGameMode)
-            {
-                string slugcat = storyGameMode.preferredSlug?.value ?? storyGameMode.currentCampaign?.value;
-                return (slugcat, "historia");
-            }
-
-            return (null, null);
-        }
-
-        private static void MatchmakingManager_HandleJoin(
-            Action<MatchmakingManager, OnlinePlayer> orig,
-            MatchmakingManager self,
-            OnlinePlayer player)
-        {
-            orig(self, player);
-
-            try
-            {
-                if (player == null || player.isMe) return;
-                if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return;
-
-                var (slugcatName, mode) = ResolveLocalSlugcatName();
-                if (string.IsNullOrEmpty(slugcatName)) return;
-                MeowSerializer.BroadcastHandshake(slugcatName);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error en HandleJoin (Meow): {ex.Message}");
-            }
-        }
-
-        private static void MatchmakingManager_HandleDisconnect(
-            Action<MatchmakingManager, OnlinePlayer> orig,
-            MatchmakingManager self,
-            OnlinePlayer player)
-        {
-            orig(self, player);
-
-            try
-            {
-                if (player == null) return;
-
-                string steamId = MeowSerializer.GetPlayerSteamId(player);
-                if (string.IsNullOrEmpty(steamId)) return;
-                MeowSerializer.ForgetPlayer(steamId);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error en HandleDisconnect (Meow): {ex.Message}");
-            }
-        }
-
         private static void MatchmakingManager_OnLobbyJoined(bool ok, string error)
         {
             if (!ok || OnlineManager.mePlayer == OnlineManager.lobby.owner)
@@ -263,45 +125,9 @@ namespace MeowxMeadow
             }
 
             // Iniciar corrutina de espera para descargar y aplicar las reglas del Host
-            Instance.StartCoroutine(TrySyncHostOptions());
+            Instance.StartCoroutine(MeowxMeadowOptions.TrySyncHostOptions());
         }
 
-        /// <summary>
-        /// Corrutina que intenta durante 5 segundos leer los datos comprimidos (bits) de configuración del Host.
-        /// </summary>
-        public static System.Collections.IEnumerator TrySyncHostOptions()
-        {
-            float timeout = 5f;
-            float elapsed = 0f;
-            bool synced = false;
-
-            while (elapsed < timeout)
-            {
-                if (OnlineManager.lobby == null) yield break;
-
-                var configurableInts = OnlineManager.lobby.configurableInts;
-
-                if (configurableInts != null && configurableInts.TryGetValue("MeowxMeadowOptions", out int remoteOptionsBits))
-                {
-                    MeowxMeadowOptions.Instance.ApplyRemoteFlags((MeowRuleFlags)remoteOptionsBits);
-                    Plugin.Logger.LogInfo($"Opciones del Host sincronizadas con éxito: {remoteOptionsBits}");
-                    synced = true;
-                    yield break;
-                }
-
-                elapsed += Time.deltaTime;
-                yield return null;
-            }
-
-            if (!synced)
-            {
-                Plugin.Logger.LogWarning("El Host no envió configuraciones de MeowxMeadowOptions tras 5 segundos de espera.");
-            }
-        }
-
-        /// <summary>
-        /// Restaura la configuración Remix local del jugador al abandonar la sala multijugador.
-        /// </summary>
         private static void OnlineManager_LeaveLobby(Action orig)
         {
             bool wasInLobby = OnlineManager.lobby != null;
@@ -311,48 +137,11 @@ namespace MeowxMeadow
 
             try
             {
-                MeowSerializer.ClearAll();
                 MeowxMeadowOptions.Instance.RestoreLocalState();
             }
             catch (Exception ex)
             {
                 Logger.LogError($"Error en LeaveLobby (Meow): {ex.Message}");
-            }
-        }
-
-        private void RainWorld_Update(On.RainWorld.orig_Update orig, RainWorld self)
-        {
-            orig(self);
-
-            try
-            {
-                if (OnlineManager.lobby != null && OnlineManager.lobby.isAvailable)
-                {
-                    if (RWCustom.Custom.rainWorld?.processManager?.currentMainLoop is not RainWorldGame)
-                    {
-                        var (lobbySlugcat, _) = ResolveLocalSlugcatName();
-                        if (lobbySlugcat != null)
-                        {
-                            if (lobbySlugcat != LastEmittedLobbySlugcat)
-                            {
-                                LastEmittedLobbySlugcat = lobbySlugcat;
-                                MeowSerializer.BroadcastHandshake(lobbySlugcat);
-                            }
-                        }
-                        else
-                        {
-                            LastEmittedLobbySlugcat = null;
-                        }
-                    }
-                }
-                else
-                {
-                    LastEmittedLobbySlugcat = null;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error en RainWorld_Update (Meow): {ex.Message}");
             }
         }
 
@@ -479,9 +268,6 @@ namespace MeowxMeadow
         public void OnDestroy()
         {
             On.RainWorld.OnModsInit -= OnModsInit;
-            On.RainWorld.Update -= RainWorld_Update;
-            On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds;
-            On.RoomCamera.SpriteLeaser.ctor -= SpriteLeaser_Ctor_Hook;
             MatchmakingManager.OnLobbyJoined -= MatchmakingManager_OnLobbyJoined;
 
             OnlinePlayersMeowButtonLastState.Clear();
@@ -490,11 +276,6 @@ namespace MeowxMeadow
             OnlinePlayersLookup.Clear();
             OnlinePlayerToKeyLookup.Clear();
 
-            PlayerMeowProfileManager.ClearAll();
-            MeowSerializer.ClearAll();
-
-            HandleJoinHook?.Dispose();
-            HandleDisconnectHook?.Dispose();
             LeaveLobbyHook?.Dispose();
             UpdateHook?.Dispose();
             HandleMeowInputHook?.Dispose();
