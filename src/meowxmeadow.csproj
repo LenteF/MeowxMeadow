@@ -37,14 +37,23 @@
   <Reference Include="dmsxmeadow">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3772996588\plugins\dmsxmeadow.dll</HintPath>
   </Reference>
+  <Reference Include="DressMySlugcat">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\2948971756\newest\plugins\DressMySlugcat.dll</HintPath>
+  </Reference>
   <Reference Include="HOOKS-Assembly-CSharp">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\plugins\HOOKS-Assembly-CSharp.dll</HintPath>
   </Reference>
   <Reference Include="ImprovedInput">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3458119961\plugins\ImprovedInput.dll</HintPath>
   </Reference>
+  <Reference Include="Mono.Cecil">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\core\Mono.Cecil.dll</HintPath>
+  </Reference>
   <Reference Include="MonoMod.RuntimeDetour">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\core\MonoMod.RuntimeDetour.dll</HintPath>
+  </Reference>
+  <Reference Include="MonoMod.Utils">
+    <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\BepInEx\core\MonoMod.Utils.dll</HintPath>
   </Reference>
   <Reference Include="PushToMeowMod">
     <HintPath>..\..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\3257541402\plugins\PushToMeowMod.dll</HintPath>

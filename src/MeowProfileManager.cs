@@ -1,8 +1,11 @@
-﻿using Newtonsoft.Json;
+﻿using DMSxMeadow;
+using MonoMod.RuntimeDetour;
+using Newtonsoft.Json;
 using PushToMeowMod;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
@@ -33,6 +36,19 @@ namespace MeowxMeadow
         public string LongMeowPupSoundId;
         public float VolumeMultiplier = 1.0f;
         public DateTime LastUpdated = DateTime.Now;
+
+        public CustomMeowDto Copy()
+        {
+            return new CustomMeowDto
+            {
+                ShortMeowSoundId = this.ShortMeowSoundId,
+                LongMeowSoundId = this.LongMeowSoundId,
+                ShortMeowPupSoundId = this.ShortMeowPupSoundId,
+                LongMeowPupSoundId = this.LongMeowPupSoundId,
+                VolumeMultiplier = this.VolumeMultiplier,
+                LastUpdated = DateTime.Now
+            };
+        }
     }
 
     public static class MeowProfileManager
@@ -41,7 +57,7 @@ namespace MeowxMeadow
         // ARCHIVO 1: DATOS DE MAULLIDO
         // ============================================================
         private static string RootPath => $"{Application.persistentDataPath}{Path.DirectorySeparatorChar}meowxmeadow{Path.DirectorySeparatorChar}";
-        private static string SaveFile => RootPath + "meowcustom.json";
+        private static string SaveFile => RootPath + "meowcustom.dat";
 
         // ============================================================
         // ARCHIVO 2: ASIGNACIONES
@@ -51,9 +67,69 @@ namespace MeowxMeadow
 
         private const int PROFILE_OFFSET = 4;
 
-        private static Dictionary<int, MeowProfileData> _unsavedProfiles = new Dictionary<int, MeowProfileData>();
+        private static readonly Dictionary<int, MeowProfileData> _unsavedProfiles = new Dictionary<int, MeowProfileData>();
 
         public static int GetInternalProfile(int displayNumber) => displayNumber + PROFILE_OFFSET;
+        public static int GetDisplayNumber(int internalNumber) => internalNumber - PROFILE_OFFSET;
+
+        // ============================================================
+        // INICIALIZACIÓN Y LIMPIEZA
+        // ============================================================
+        private static Hook DeleteProfileHook;
+        private static Hook SetCurrentProfileHook;
+        private static Hook SetSteamIdHook;
+        private static Hook RemoveAssignmentHook;
+        private static Hook DeleteOrphanProfilesHook;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Initialize()
+        {
+            try
+            {
+                MethodInfo deleteProfileMethod = typeof(MeadowProfileManager).GetMethod("DeleteProfile", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo deleteProfileHook = typeof(MeowProfileManager).GetMethod("MeadowProfileManager_DeleteProfile", BindingFlags.NonPublic | BindingFlags.Static);
+                if (deleteProfileMethod != null && deleteProfileHook != null)
+                    DeleteProfileHook = new Hook(deleteProfileMethod, deleteProfileHook);
+
+                MethodInfo setCurrentProfileMethod = typeof(MeadowProfileManager).GetMethod("SetCurrentProfile", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo setCurrentProfileHook = typeof(MeowProfileManager).GetMethod("MeadowProfileManager_SetCurrentProfile", BindingFlags.NonPublic | BindingFlags.Static);
+                if (setCurrentProfileMethod != null && setCurrentProfileHook != null)
+                    SetCurrentProfileHook = new Hook(setCurrentProfileMethod, setCurrentProfileHook);
+
+                MethodInfo setSteamIdMethod = typeof(MeadowProfileManager).GetMethod("SetSteamID", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo setSteamIdHook = typeof(MeowProfileManager).GetMethod("MeadowProfileManager_SetSteamID", BindingFlags.NonPublic | BindingFlags.Static);
+                if (setSteamIdMethod != null && setSteamIdHook != null)
+                    SetSteamIdHook = new Hook(setSteamIdMethod, setSteamIdHook);
+
+                MethodInfo removeAssignmentMethod = typeof(MeadowProfileManager).GetMethod("RemoveAssignment", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo removeAssignmentHook = typeof(MeowProfileManager).GetMethod("MeadowProfileManager_RemoveAssignment", BindingFlags.NonPublic | BindingFlags.Static);
+                if (removeAssignmentMethod != null && removeAssignmentHook != null)
+                    RemoveAssignmentHook = new Hook(removeAssignmentMethod, removeAssignmentHook);
+
+                MethodInfo deleteOrphanProfilesMethod = typeof(MeadowProfileManager).GetMethod("DeleteOrphanProfiles", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo deleteOrphanProfilesHook = typeof(MeowProfileManager).GetMethod("MeadowProfileManager_DeleteOrphanProfiles", BindingFlags.NonPublic | BindingFlags.Static);
+                if (deleteOrphanProfilesMethod != null && deleteOrphanProfilesHook != null)
+                    DeleteOrphanProfilesHook = new Hook(deleteOrphanProfilesMethod, deleteOrphanProfilesHook);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error instalando hooks: {ex.Message}");
+            }
+
+            Load();
+            SyncProfilesWithDxm();
+        }
+
+        public static void Dispose()
+        {
+            DeleteProfileHook?.Dispose();
+            SetCurrentProfileHook?.Dispose();
+            SetSteamIdHook?.Dispose();
+            RemoveAssignmentHook?.Dispose();
+            DeleteOrphanProfilesHook?.Dispose();
+
+            _unsavedProfiles.Clear();
+        }
 
         // ============================================================
         // CARGAR / GUARDAR PERFILES (Versión JSON legible para tests)
@@ -64,11 +140,14 @@ namespace MeowxMeadow
             {
                 if (File.Exists(SaveFile))
                 {
-                    string jsonContent = File.ReadAllText(SaveFile);
-                    var loaded = JsonConvert.DeserializeObject<MeowDatabase>(jsonContent);
-                    if (loaded != null)
+                    using (var fs = new FileStream(SaveFile, FileMode.Open))
                     {
-                        return loaded;
+                        var formatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+                        var loaded = (MeowDatabase)formatter.Deserialize(fs);
+                        if (loaded != null)
+                        {
+                            return loaded;
+                        }
                     }
                 }
             }
@@ -96,8 +175,11 @@ namespace MeowxMeadow
                     Directory.CreateDirectory(RootPath);
                 }
 
-                string jsonContent = JsonConvert.SerializeObject(toSave, Formatting.Indented);
-                File.WriteAllText(SaveFile, jsonContent);
+                using (var fs = new FileStream(SaveFile, FileMode.Create))
+                {
+                    var formatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+                    formatter.Serialize(fs, toSave);
+                }
             }
             catch (Exception ex)
             {
@@ -123,13 +205,37 @@ namespace MeowxMeadow
             if (Database.Profiles.TryGetValue(internalNumber, out var persisted))
                 return persisted;
 
+            if (_unsavedProfiles.TryGetValue(displayNumber, out var scratch))
+                return scratch;
+
             var newProfile = new MeowProfileData
             {
                 InternalProfileNumber = internalNumber
             };
 
-            Database.Profiles[internalNumber] = newProfile;
+            _unsavedProfiles[displayNumber] = newProfile;
             return newProfile;
+        }
+
+        public static void SaveProfileOption(int displayNumber, string slugcatName, CustomMeowDto meowDto)
+        {
+            var profileData = GetOrCreateProfile(displayNumber);
+            if (profileData == null) return;
+
+            if (profileData.MeowsBySlugcat == null)
+                profileData.MeowsBySlugcat = new Dictionary<string, CustomMeowDto>(StringComparer.Ordinal);
+
+            profileData.MeowsBySlugcat[slugcatName] = meowDto;
+            profileData.LastUpdated = DateTime.Now;
+
+            string steamId = GetSteamID(displayNumber);
+            if (!string.IsNullOrEmpty(steamId))
+            {
+                int internalNumber = GetInternalProfile(displayNumber);
+                Database.Profiles[internalNumber] = profileData;
+                _unsavedProfiles.Remove(displayNumber);
+                Save();
+            }
         }
 
         public static CustomMeowDto GetProfileCustomMeow(int displayNumber, string slugcatName)
@@ -141,6 +247,127 @@ namespace MeowxMeadow
                 return customMeowDto;
             }
             return null;
+        }
+
+        private static void DiscardUnsavedIfOrphan(int displayNumber)
+        {
+            if (string.IsNullOrEmpty(GetSteamID(displayNumber)) && _unsavedProfiles.ContainsKey(displayNumber))
+            {
+                _unsavedProfiles.Remove(displayNumber);
+            }
+        }
+
+        public static void SyncProfilesWithDxm()
+        {
+            if (!Plugin.IsDmsxMeadowActive || Database.Profiles == null || Database.Profiles.Count == 0)
+                return;
+
+            try
+            {
+                HashSet<int> validDisplayNumbers = GetAllProfileNumbersInternal();
+                var toRemove = new List<int>();
+
+                foreach (int internalNumber in Database.Profiles.Keys)
+                {
+                    int displayNum = GetDisplayNumber(internalNumber);
+
+                    if (!validDisplayNumbers.Contains(displayNum))
+                    {
+                        toRemove.Add(internalNumber);
+                    }
+                }
+
+                if (toRemove.Count > 0)
+                {
+                    foreach (int internalNumber in toRemove)
+                    {
+                        Database.Profiles.Remove(internalNumber);
+                    }
+                    Save();
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error sincronizando perfiles con DxM: {ex.Message}");
+            }
+        }
+
+        // ============================================================
+        // OPERACIONES CON PERFILES (DMSxMeadow)
+        // ============================================================
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static HashSet<int> GetAllProfileNumbersInternal()
+        {
+            var list = MeadowProfileManager.GetAllProfileNumbers();
+            return list != null ? new HashSet<int>(list) : new HashSet<int>();
+        }
+
+        private static void MeadowProfileManager_DeleteProfile(Action<int> orig, int displayNumber)
+        {
+            try
+            {
+                int internalNumber = GetInternalProfile(displayNumber);
+                if (Database.Profiles != null && Database.Profiles.TryGetValue(internalNumber, out var existing))
+                {
+                    _unsavedProfiles[displayNumber] = existing;
+                    Database.Profiles.Remove(internalNumber);
+                    Save();
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error en hook DeleteProfile({displayNumber}): {ex.Message}");
+            }
+
+            orig(displayNumber);
+        }
+
+        private static void MeadowProfileManager_SetCurrentProfile(Action<int> orig, int displayNumber)
+        {
+            try
+            {
+                int previousProfile = GetCurrentProfileNumber();
+                if (previousProfile != displayNumber)
+                {
+                    DiscardUnsavedIfOrphan(previousProfile);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error descartando borrador previo en SetCurrentProfile: {ex.Message}");
+            }
+
+            orig(displayNumber);
+        }
+
+        private static int MeadowProfileManager_DeleteOrphanProfiles(Func<int> orig)
+        {
+            int dxmDeleted = orig();
+
+            try
+            {
+                SyncProfilesWithDxm();
+
+                var toRemoveMemory = new List<int>();
+                foreach (int displayNumber in _unsavedProfiles.Keys)
+                {
+                    if (string.IsNullOrEmpty(GetSteamID(displayNumber)))
+                    {
+                        toRemoveMemory.Add(displayNumber);
+                    }
+                }
+
+                foreach (int displayNumber in toRemoveMemory)
+                {
+                    _unsavedProfiles.Remove(displayNumber);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error en hook DeleteOrphanProfiles: {ex.Message}");
+            }
+
+            return dxmDeleted;
         }
 
         // ============================================================
@@ -164,18 +391,68 @@ namespace MeowxMeadow
         // ============================================================
         // OPERACIONES CON ASIGNACIONES SteamID (DMSxMeadow)
         // ============================================================
-        public static int GetProfileBySteamID(string steamID)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static int GetProfileBySteamID(string steamID)
         {
-            if (!BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("dmsxmeadow") || string.IsNullOrEmpty(steamID))
-                return -1;
-
-            return GetProfileInternal(steamID);
+            return MeadowProfileManager.GetProfileBySteamID(steamID);
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static int GetProfileInternal(string steamID)
+        public static string GetSteamID(int displayNumber)
         {
-            return DMSxMeadow.MeadowProfileManager.GetProfileBySteamID(steamID);
+            return MeadowProfileManager.GetSteamID(displayNumber);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GetCurrentProfileNumber()
+        {
+            return MeadowProfileManager.CurrentProfileNumber;
+        }
+
+        private static void MeadowProfileManager_SetSteamID(Action<int, string> orig, int displayNumber, string steamID)
+        {
+            orig(displayNumber, steamID);
+
+            try
+            {
+                int internalNumber = GetInternalProfile(displayNumber);
+                if (!string.IsNullOrEmpty(steamID))
+                {
+                    if (_unsavedProfiles.TryGetValue(displayNumber, out var pending))
+                    {
+                        Database.Profiles[internalNumber] = pending;
+                        _unsavedProfiles.Remove(displayNumber);
+                        Save();
+                    }
+                }
+                else
+                {
+                    if (Database.Profiles != null && Database.Profiles.TryGetValue(internalNumber, out var existing))
+                    {
+                        _unsavedProfiles[displayNumber] = existing;
+                        Database.Profiles.Remove(internalNumber);
+                        Save();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error en hook SetSteamID({displayNumber}): {ex.Message}");
+            }
+        }
+
+        private static void MeadowProfileManager_RemoveAssignment(Action<int> orig, int displayNumber)
+        {
+            orig(displayNumber);
+
+            try
+            {
+                DiscardUnsavedIfOrphan(displayNumber);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogError($"[MeowProfileManager] Error en hook RemoveAssignment({displayNumber}): {ex.Message}");
+            }
         }
 
         // ============================================================
@@ -218,7 +495,9 @@ namespace MeowxMeadow
             {
                 string slugcatName = self.SlugCatClass.value;
 
-                CustomMeow? customMeow = GetMeowPackageBySteamID(steamId, slugcatName);
+                CustomMeow? customMeow = null;
+                if (Plugin.IsDmsxMeadowActive)
+                    customMeow = GetMeowPackageBySteamID(steamId, slugcatName);
 
                 if (customMeow.HasValue)
                 {

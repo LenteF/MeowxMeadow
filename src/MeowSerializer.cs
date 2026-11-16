@@ -1,9 +1,22 @@
 ﻿using RainMeadow;
+using System;
 
 namespace MeowxMeadow
 {
     internal static class MeowSerializer
     {
+        public static string GetLocalSteamId()
+        {
+            try
+            {
+                return Steamworks.SteamUser.GetSteamID().m_SteamID.ToString();
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogWarning($"[MeowFancyUI] Steam no disponible ({ex.Message}); usando identidad de RainMeadow.");
+                return MeowSerializer.GetPlayerSteamId(OnlineManager.mePlayer);
+            }
+        }
         public static string GetPlayerSteamId(OnlinePlayer player)
         {
             if (player?.id == null) return string.Empty;

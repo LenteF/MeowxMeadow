@@ -10,9 +10,10 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.0.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.1.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
+    [BepInDependency("dressmyslugcat", BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency("dmsxmeadow", BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
@@ -62,9 +63,13 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Plugin.Logger.LogInfo("Build 2.0.0 (14/11/2026: reestructuración y reescritura del sistema de asignación de sonidos a nivel local). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Logger.LogInfo("Build 2.1.0 (15/11/2026: Uso de perfiles de sonido por slugcat e integración con DMSxMeadow y el menú Get Fancy como soft dependencies). Si NO ves esta línea, se está cargando un DLL viejo.");
 
-                MeowProfileManager.Load();
+                if (IsDmsxMeadowActive)
+                {
+                    MeowProfileManager.Initialize();
+                    MeowFancyMenuUI.Initialize();
+                }
 
                 InitializeHooks();
             }
@@ -275,6 +280,9 @@ namespace MeowxMeadow
             OnlinePlayersLastMeowTime.Clear();
             OnlinePlayersLookup.Clear();
             OnlinePlayerToKeyLookup.Clear();
+
+            MeowFancyMenuUI.Dispose();
+            MeowProfileManager.Dispose();
 
             LeaveLobbyHook?.Dispose();
             UpdateHook?.Dispose();
