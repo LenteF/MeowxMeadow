@@ -55,10 +55,9 @@ namespace MeowxMeadow
 
     public static class LegacyRpcBridge
     {
-        //private static readonly Guid LegacyModuleGuid = new Guid("2578841e-dac6-445f-801a-838805167784");
-        private static readonly Guid LegacyModuleGuid = new Guid("626a5aec-facf-4732-aba0-da07a9d33d88");
+        private static readonly Guid LegacyModuleGuid = new Guid("2578841e-dac6-445f-801a-838805167784");
         private static RPCManager.SoftRPCDefinition _legacyDefinition;
-        private const bool LogLegacyAssemblyGuidOnStartup = true;
+        private const bool LogLegacyAssemblyGuidOnStartup = false;
 
         public static void Initialize()
         {

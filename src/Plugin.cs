@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.2.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.3.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("dressmyslugcat", BepInDependency.DependencyFlags.SoftDependency)]
@@ -27,6 +27,7 @@ namespace MeowxMeadow
         public Dictionary<string, Player> OnlinePlayersLookup = new Dictionary<string, Player>();
         public Dictionary<Player, string> OnlinePlayerToKeyLookup = new Dictionary<Player, string>();
 
+        private Hook HandleDisconnectHook;
         private Hook LeaveLobbyHook;
         private Hook UpdateHook;
         private Hook HandleMeowInputHook;
@@ -63,7 +64,7 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Logger.LogInfo("Build 2.2.0 (22/11/2026: Retrocompatibilidad con Push To Meow - Rain Meadow Compatibility Add-On, VolumeMultiplier modificable y añadido botón de previsualización del paquete seleccionado desde el menu GetFancy). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Logger.LogInfo("Build 2.3.0 (22/11/2026: Limpieza dinámica de diccionarios). Si NO ves esta línea, se está cargando un DLL viejo.");
                 
                 if (IsDmsxMeadowActive)
                 {
@@ -87,6 +88,11 @@ namespace MeowxMeadow
             try
             {
                 MatchmakingManager.OnLobbyJoined += MatchmakingManager_OnLobbyJoined;
+
+                MethodInfo disconnectMethod = typeof(MatchmakingManager).GetMethod("HandleDisconnect", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo disconnectHook = typeof(Plugin).GetMethod("MatchmakingManager_HandleDisconnect", BindingFlags.NonPublic | BindingFlags.Static);
+                if (disconnectMethod != null && disconnectHook != null)
+                    this.HandleDisconnectHook = new Hook(disconnectMethod, disconnectHook);
 
                 MethodInfo leaveLobbyMethod = typeof(OnlineManager).GetMethod("LeaveLobby", BindingFlags.Public | BindingFlags.Static);
                 MethodInfo leaveLobbyHook = typeof(Plugin).GetMethod("OnlineManager_LeaveLobby", BindingFlags.NonPublic | BindingFlags.Static);
@@ -135,6 +141,28 @@ namespace MeowxMeadow
             Instance.StartCoroutine(MeowxMeadowOptions.TrySyncHostOptions());
         }
 
+        private static void MatchmakingManager_HandleDisconnect(
+            Action<MatchmakingManager, OnlinePlayer> orig,
+            MatchmakingManager self,
+            OnlinePlayer player)
+        {
+            orig(self, player);
+
+            try
+            {
+                if (player == null) return;
+
+                string steamId = MeowSerializer.GetPlayerSteamId(player);
+                if (string.IsNullOrEmpty(steamId)) return;
+
+                Instance.RemoveOnlinePlayerState(steamId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Hook error (HandleDisconnect): {ex.Message}");
+            }
+        }
+
         private static void OnlineManager_LeaveLobby(Action orig)
         {
             bool wasInLobby = OnlineManager.lobby != null;
@@ -144,11 +172,12 @@ namespace MeowxMeadow
 
             try
             {
-                MeowxMeadowOptions.Instance.RestoreLocalState();
+                Instance?.ClearAllOnlinePlayerStates();
+                MeowxMeadowOptions.Instance?.RestoreLocalState();
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Error en LeaveLobby (Meow): {ex.Message}");
+                Logger.LogError($"Hook error (LeaveLobby): {ex.Message}");
             }
         }
 
@@ -272,16 +301,39 @@ namespace MeowxMeadow
             }
         }
 
-        public void OnDestroy()
+        public void ClearAllOnlinePlayerStates()
         {
-            On.RainWorld.OnModsInit -= OnModsInit;
-            MatchmakingManager.OnLobbyJoined -= MatchmakingManager_OnLobbyJoined;
-
             OnlinePlayersMeowButtonLastState.Clear();
             OnlinePlayersMeowingState.Clear();
             OnlinePlayersLastMeowTime.Clear();
             OnlinePlayersLookup.Clear();
             OnlinePlayerToKeyLookup.Clear();
+        }
+
+        public void RemoveOnlinePlayerState(string steamId)
+        {
+            if (string.IsNullOrEmpty(steamId)) return;
+
+            OnlinePlayersMeowButtonLastState?.Remove(steamId);
+            OnlinePlayersMeowingState?.Remove(steamId);
+            OnlinePlayersLastMeowTime?.Remove(steamId);
+
+            if (OnlinePlayersLookup.TryGetValue(steamId, out var player))
+            {
+                if (player is not null)
+                {
+                    OnlinePlayerToKeyLookup?.Remove(player);
+                }
+                OnlinePlayersLookup.Remove(steamId);
+            }
+        }
+
+        public void OnDestroy()
+        {
+            On.RainWorld.OnModsInit -= OnModsInit;
+            MatchmakingManager.OnLobbyJoined -= MatchmakingManager_OnLobbyJoined;
+
+            ClearAllOnlinePlayerStates();
 
             MeowFancyMenuUI.Dispose();
             MeowProfileManager.Dispose();

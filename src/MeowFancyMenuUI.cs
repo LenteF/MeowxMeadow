@@ -530,9 +530,6 @@ namespace MeowxMeadow
             if (_nextButton != null)
                 _nextButton.inactive = !meadowOn;
 
-            if (_previewButton != null)
-                _previewButton.inactive = !meadowOn;
-
             if (_volumeSlider != null)
                 _volumeSlider.buttonBehav.greyedOut = !meadowOn;
         }
@@ -577,15 +574,15 @@ namespace MeowxMeadow
 
         public void HandleSignal(string message)
         {
-            if (!MeowFancyMenuUI.IsMeadowModeOn())
-            {
-                _fancyMenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
-                return;
-            }
-
             if (message == "MEOW_PREVIEW")
             {
                 PreviewMeow();
+                return;
+            }
+
+            if (!MeowFancyMenuUI.IsMeadowModeOn())
+            {
+                _fancyMenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
                 return;
             }
 
@@ -828,13 +825,17 @@ namespace MeowxMeadow
             bool isPup = string.Equals(slugcatId, "Slugpup", StringComparison.Ordinal);
 
             CustomMeow? customMeow = null;
-            int profile = MeowProfileManager.GetCurrentProfileNumber();
-            if (profile > 0)
+            bool meadowMode = MeowFancyMenuUI.IsMeadowModeOn();
+            if (meadowMode)
             {
-                CustomMeowDto dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcatId);
-                if (dto != null)
+                int profile = MeowProfileManager.GetCurrentProfileNumber();
+                if (profile > 0)
                 {
-                    customMeow = MeowProfileManager.ConvertDtoToCustomMeow(dto);
+                    CustomMeowDto dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcatId);
+                    if (dto != null)
+                    {
+                        customMeow = MeowProfileManager.ConvertDtoToCustomMeow(dto);
+                    }
                 }
             }
 

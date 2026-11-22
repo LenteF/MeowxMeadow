@@ -131,7 +131,7 @@ namespace MeowxMeadow
         }
 
         // ============================================================
-        // CARGAR / GUARDAR PERFILES (Versión JSON legible para tests)
+        // CARGAR / GUARDAR PERFILES
         // ============================================================
         public static MeowDatabase Load()
         {
