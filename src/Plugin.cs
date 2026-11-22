@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.1.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.2.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("dressmyslugcat", BepInDependency.DependencyFlags.SoftDependency)]
@@ -63,14 +63,16 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Logger.LogInfo("Build 2.1.0 (15/11/2026: Uso de perfiles de sonido por slugcat e integración con DMSxMeadow y el menú Get Fancy como soft dependencies). Si NO ves esta línea, se está cargando un DLL viejo.");
-
+                Logger.LogInfo("Build 2.2.0 (22/11/2026: Retrocompatibilidad con Push To Meow - Rain Meadow Compatibility Add-On, VolumeMultiplier modificable y añadido botón de previsualización del paquete seleccionado desde el menu GetFancy). Si NO ves esta línea, se está cargando un DLL viejo.");
+                
                 if (IsDmsxMeadowActive)
                 {
                     MeowProfileManager.Initialize();
                     MeowFancyMenuUI.Initialize();
                 }
 
+                LegacyRpcBridge.LogLegacyAssemblyGuidIfEnabled();
+                LegacyRpcBridge.Initialize();
                 InitializeHooks();
             }
             catch (Exception ex)

@@ -1,6 +1,5 @@
 ﻿using DMSxMeadow;
 using MonoMod.RuntimeDetour;
-using Newtonsoft.Json;
 using PushToMeowMod;
 using System;
 using System.Collections.Generic;
@@ -65,12 +64,12 @@ namespace MeowxMeadow
         private static MeowDatabase _database;
         public static MeowDatabase Database => _database ??= Load();
 
-        private const int PROFILE_OFFSET = 4;
-
         private static readonly Dictionary<int, MeowProfileData> _unsavedProfiles = new Dictionary<int, MeowProfileData>();
 
-        public static int GetInternalProfile(int displayNumber) => displayNumber + PROFILE_OFFSET;
-        public static int GetDisplayNumber(int internalNumber) => internalNumber - PROFILE_OFFSET;
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GetInternalProfile(int displayNumber) => MeadowProfileManager.GetInternalProfile(displayNumber);
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GetDisplayNumber(int internalNumber) => MeadowProfileManager.GetDisplayNumber(internalNumber);
 
         // ============================================================
         // INICIALIZACIÓN Y LIMPIEZA
@@ -373,7 +372,7 @@ namespace MeowxMeadow
         // ============================================================
         // OPERACIONES CON ASIGNACIONES SteamID
         // ============================================================
-        public static CustomMeowDto GetCustomMeowDtoBySteamID(string steamId, string slugcatName)
+        private static CustomMeowDto GetCustomMeowDtoBySteamID(string steamId, string slugcatName)
         {
             if (string.IsNullOrEmpty(steamId) || string.IsNullOrEmpty(slugcatName))
                 return null;
@@ -458,7 +457,7 @@ namespace MeowxMeadow
         // ============================================================
         // CONVERSIÓN Y RESOLUCIÓN DE SONIDOS
         // ============================================================
-        private static CustomMeow ConvertDtoToCustomMeow(CustomMeowDto dto)
+        public static CustomMeow ConvertDtoToCustomMeow(CustomMeowDto dto)
         {
             CustomMeow custom = new CustomMeow();
 
@@ -489,6 +488,7 @@ namespace MeowxMeadow
 
             return ConvertDtoToCustomMeow(dto);
         }
+
         private static (SoundID meowSoundID, float pitch, float volume) MeowUtils_FindMeowSoundID(Func<Player, bool, (SoundID, float, float)> orig, Player self, bool isShortMeow)
         {
             if (Plugin.Instance.OnlinePlayerToKeyLookup.TryGetValue(self, out string steamId) && !string.IsNullOrEmpty(steamId))
@@ -504,7 +504,7 @@ namespace MeowxMeadow
                     var meow = customMeow.Value;
                     bool isPup = self.playerState.isPup;
                     float pitch = isPup ? 1.3f : 1f;
-                    float volume = PushToMeowMain.ModSettings.MeowVolumeMultiplier.Value * meow.VolumeMultiplier;
+                    float volume = MeowVolumeManager.GetPlaybackVolume(PushToMeowMain.ModSettings.MeowVolumeMultiplier.Value, meow.VolumeMultiplier);
 
                     SoundID meowType;
                     if (isPup)
@@ -541,6 +541,49 @@ namespace MeowxMeadow
             }
 
             return orig(self, isShortMeow);
+        }
+    }
+
+    public static class MeowVolumeManager
+    {
+        private const float MinVolume = 0f;
+        private const float MaxVolume = 2f;
+        private const float DefaultVolume = 1f;
+
+        public static float GetProfileVolume(int profile, string slugcatId)
+        {
+            CustomMeowDto dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcatId);
+            return GetProfileMultiplier(dto);
+        }
+
+        public static float Normalize(float volume)
+        {
+            return Mathf.Clamp(volume, MinVolume, MaxVolume);
+        }
+
+        public static float GetProfileMultiplier(CustomMeowDto dto)
+        {
+            return dto != null ? Normalize(dto.VolumeMultiplier) : DefaultVolume;
+        }
+
+        public static float GetPlaybackVolume(float globalVolume, float profileMultiplier)
+        {
+            return Mathf.Clamp01(globalVolume) * Normalize(profileMultiplier);
+        }
+
+        public static float ToSliderValue(float volume)
+        {
+            return Mathf.InverseLerp(MinVolume, MaxVolume, Normalize(volume));
+        }
+
+        public static float FromSliderValue(float sliderValue)
+        {
+            return Mathf.Lerp(MinVolume, MaxVolume, Mathf.Clamp01(sliderValue));
+        }
+
+        public static int ToPercentage(float volume)
+        {
+            return Mathf.RoundToInt(Normalize(volume) * 100f);
         }
     }
 }
