@@ -25,13 +25,34 @@ namespace MeowxMeadow
         private static Hook HandleMeadowCopyPasteDefaultsHook;
         private static ILHook LoadedMeowsIlHook;
 
-        private static Dictionary<FancyMenu, MeowMenuPanel> _panels =
-            new Dictionary<FancyMenu, MeowMenuPanel>();
+        private static Dictionary<object, MeowMenuPanel> _panels =
+            new Dictionary<object, MeowMenuPanel>();
+
+        private static bool TryGetPanel(object menuKey, out MeowMenuPanel panel)
+        {
+            panel = null;
+            if (menuKey == null) return false;
+            return _panels.TryGetValue(menuKey, out panel) && panel != null;
+        }
+
+        private static void SetPanel(object menuKey, MeowMenuPanel panel)
+        {
+            if (menuKey == null || panel == null) return;
+            _panels[menuKey] = panel;
+        }
+
+        private static bool RemovePanel(object menuKey)
+        {
+            if (menuKey == null) return false;
+            return _panels.Remove(menuKey);
+        }
+
         private static readonly Dictionary<string, List<MeowOption>> _optionsBySlugcat = new Dictionary<string, List<MeowOption>>(StringComparer.Ordinal);
 
         private static CustomMeowDto _copiedMeowDto;
         private static bool _hasCopiedMeowState = false;
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static void Initialize()
         {
             try
@@ -120,27 +141,30 @@ namespace MeowxMeadow
             }
         }
 
-        private static void EnsurePanel(FancyMenu menu)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void EnsurePanel(object menu)
         {
-            if (!_panels.TryGetValue(menu, out var panel))
+            if (menu is not FancyMenu fancyMenu) return; 
+
+            if (!TryGetPanel(fancyMenu, out var panel))
             {
-                panel = new MeowMenuPanel(menu);
+                panel = new MeowMenuPanel(fancyMenu);
                 panel.Initialize();
-                _panels[menu] = panel;
+                SetPanel(fancyMenu, panel);
             }
 
             panel.Tick();
         }
 
         private static void Singal_Hook(
-            Action<FancyMenu, MenuObject, string> orig,
-            FancyMenu menu,
+            Action<object, MenuObject, string> orig,
+            object menu,
             MenuObject sender,
             string message)
         {
             if (message == "MEOW_PREV" || message == "MEOW_NEXT" || message == "MEOW_PREVIEW")
             {
-                if (_panels.TryGetValue(menu, out var panel))
+                if (TryGetPanel(menu, out var panel))
                     panel.HandleSignal(message);
                 return;
             }
@@ -148,15 +172,15 @@ namespace MeowxMeadow
             orig(menu, sender, message);
         }
 
-        private static void ShutDownProcess_Hook(Action<DressMySlugcat.FancyMenu> orig, DressMySlugcat.FancyMenu self)
+        private static void ShutDownProcess_Hook(Action<object> orig, object self)
         {
-            if (_panels.TryGetValue(self, out var panel))
+            if (TryGetPanel(self, out var panel))
                 panel.CommitVolume();
-            _panels.Remove(self);
+            RemovePanel(self);
             orig(self);
         }
 
-        private static Customization GetDmsCopiedCustomization_Hook(Func<FancyMenu, Customization> orig, FancyMenu fancyMenu)
+        private static object GetDmsCopiedCustomization_Hook(Func<object, object> orig, object fancyMenu)
         {
             var result = orig(fancyMenu);
             _copiedMeowDto = new CustomMeowDto();
@@ -164,12 +188,14 @@ namespace MeowxMeadow
             return result;
         }
 
-        private static void HandleMeadowCopyPasteDefaults_Hook(Action<FancyMenu, string> orig, FancyMenu fancyMenu, string message)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HandleMeadowCopyPasteDefaults_Hook(Action<object, string> orig, object menu, string message)
         {
-            orig(fancyMenu, message);
+            orig(menu, message);
 
             try
             {
+                if (menu is not FancyMenu fancyMenu) return;
                 int profile = MeowProfileManager.GetCurrentProfileNumber();
                 if (profile <= 0) return;
 
@@ -178,16 +204,7 @@ namespace MeowxMeadow
                 if (message == "CUST_COPY")
                 {
                     var dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcat);
-                    _copiedMeowDto = dto != null ? new CustomMeowDto
-                    {
-                        ShortMeowSoundId = dto.ShortMeowSoundId,
-                        LongMeowSoundId = dto.LongMeowSoundId,
-                        ShortMeowPupSoundId = dto.ShortMeowPupSoundId,
-                        LongMeowPupSoundId = dto.LongMeowPupSoundId,
-                        VolumeMultiplier = dto.VolumeMultiplier,
-                        LastUpdated = DateTime.Now
-                    } : null;
-
+                    _copiedMeowDto = dto != null ? dto.Copy() : null;
                     _hasCopiedMeowState = true;
                     return;
                 }
@@ -198,36 +215,8 @@ namespace MeowxMeadow
                         return;
 
                     var targetOptions = GetOptionsForSlugcat(slugcat);
-                    MeowOption matchingOption = null;
-
-                    if (_copiedMeowDto != null)
-                    {
-                        matchingOption = targetOptions.FirstOrDefault(opt =>
-                            string.Equals(opt.ShortMeowSoundId ?? "", _copiedMeowDto.ShortMeowSoundId ?? "", StringComparison.Ordinal) &&
-                            string.Equals(opt.LongMeowSoundId ?? "", _copiedMeowDto.LongMeowSoundId ?? "", StringComparison.Ordinal) &&
-                            string.Equals(opt.ShortMeowPupSoundId ?? "", _copiedMeowDto.ShortMeowPupSoundId ?? "", StringComparison.Ordinal) &&
-                            string.Equals(opt.LongMeowPupSoundId ?? "", _copiedMeowDto.LongMeowPupSoundId ?? "", StringComparison.Ordinal)
-                        );
-                    }
-
-                    CustomMeowDto pastedDto;
-                    if (matchingOption != null)
-                    {
-                        pastedDto = new CustomMeowDto
-                        {
-                            ShortMeowSoundId = matchingOption.ShortMeowSoundId,
-                            LongMeowSoundId = matchingOption.LongMeowSoundId,
-                            ShortMeowPupSoundId = matchingOption.ShortMeowPupSoundId,
-                            LongMeowPupSoundId = matchingOption.LongMeowPupSoundId,
-                            VolumeMultiplier = _copiedMeowDto.VolumeMultiplier,
-                            LastUpdated = DateTime.Now
-                        };
-                    }
-                    else
-                    {
-                        pastedDto = new CustomMeowDto();
-                    }
-
+                    MeowOption matchingOption = _copiedMeowDto != null ? targetOptions.FirstOrDefault(opt => _copiedMeowDto.MatchesOption(opt)) : null;
+                    CustomMeowDto pastedDto = matchingOption != null ? CustomMeowDto.FromOption(matchingOption, _copiedMeowDto.VolumeMultiplier) : new CustomMeowDto();
                     MeowProfileManager.SaveProfileOption(profile, slugcat, pastedDto);
                 }
                 else if (message == "CUST_DEFAULTS")
@@ -235,7 +224,7 @@ namespace MeowxMeadow
                     MeowProfileManager.SaveProfileOption(profile, slugcat, new CustomMeowDto());
                 }
 
-                if (_panels.TryGetValue(fancyMenu, out var panel))
+                if (TryGetPanel(fancyMenu, out var panel))
                 {
                     panel.RefreshDisplay();
                 }
@@ -292,28 +281,11 @@ namespace MeowxMeadow
             }
 
             bool isSlugpup = string.Equals(slugcatId, "Slugpup", StringComparison.Ordinal);
-
-            bool exists = list.Any(o =>
-                string.Equals(o.ShortMeowSoundId, json.short_meow_soundid ?? "", StringComparison.Ordinal) &&
-                string.Equals(o.LongMeowSoundId, json.long_meow_soundid ?? "", StringComparison.Ordinal) &&
-                (!isSlugpup || (
-                    string.Equals(o.ShortMeowPupSoundId, json.short_meow_pup_soundid ?? "", StringComparison.Ordinal) &&
-                    string.Equals(o.LongMeowPupSoundId, json.long_meow_pup_soundid ?? "", StringComparison.Ordinal)
-                ))
-            );
-
+            bool exists = list.Any(o => o.MatchesJson(json, isSlugpup));
             if (!exists)
             {
                 Plugin.Logger.LogInfo($"[MeowFancyUI] -> ¡Añadido con éxito! Maullido de '{modName}' registrado para '{slugcatId}'.");
-                list.Add(new MeowOption
-                {
-                    Label = modName,
-                    ShortMeowSoundId = json.short_meow_soundid ?? "",
-                    LongMeowSoundId = json.long_meow_soundid ?? "",
-                    ShortMeowPupSoundId = json.short_meow_pup_soundid ?? "",
-                    LongMeowPupSoundId = json.long_meow_pup_soundid ?? "",
-                    VolumeMultiplier = MeowVolumeManager.Normalize(json.volume_multiplier)
-                });
+                list.Add(MeowOption.FromJson(modName, json));
             }
             else
             {
@@ -391,7 +363,7 @@ namespace MeowxMeadow
         {
             private readonly MeowMenuPanel _panel;
 
-            public VolumeSliderHost(FancyMenu menu, Page page, MeowMenuPanel panel) : base(menu, page)
+            public VolumeSliderHost(Menu.Menu menu, Page page, MeowMenuPanel panel) : base(menu, page)
             {
                 _panel = panel;
             }
@@ -418,7 +390,7 @@ namespace MeowxMeadow
             }
         }
 
-        private FancyMenu _fancyMenu;
+        private object _fancyMenu;
         private SimpleButton _prevButton;
         private SimpleButton _nextButton;
         private SimpleButton _previewButton;
@@ -437,26 +409,30 @@ namespace MeowxMeadow
         private bool _lastMeadowState = false;
         private int _currentIndex = 0;
 
-        public MeowMenuPanel(FancyMenu fancyMenu)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public MeowMenuPanel(object menu)
         {
-            _fancyMenu = fancyMenu;
+            if (menu is FancyMenu fancyMenu) 
+                _fancyMenu = fancyMenu;
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public void Initialize()
         {
             if (_uiAdded) return;
+            if (_fancyMenu is not FancyMenu fancymenu) return;
 
             try
             {
                 var borderField = typeof(FancyMenu).GetField("textBoxBorder",
                     BindingFlags.Public | BindingFlags.Instance);
-                var textBoxBorder = borderField?.GetValue(_fancyMenu) as RoundedRect;
+                var textBoxBorder = borderField?.GetValue(fancymenu) as RoundedRect;
                 if (textBoxBorder == null) return;
 
                 var playerButtonsField = typeof(FancyMenu).GetField("playerButtons",
                     BindingFlags.Public | BindingFlags.Instance);
                 int playerCount = 4;
-                if (playerButtonsField?.GetValue(_fancyMenu) is Array playerButtons && playerButtons.Length > 0)
+                if (playerButtonsField?.GetValue(fancymenu) is Array playerButtons && playerButtons.Length > 0)
                     playerCount = playerButtons.Length;
 
                 float baseStartX = textBoxBorder.pos.x + (65f * playerCount) + 10f;
@@ -475,43 +451,43 @@ namespace MeowxMeadow
                 float displayY = baseYPos + 95f;
                 float statusY = baseYPos + 130f;
 
-                _titleLabel = new MenuLabel(_fancyMenu, _fancyMenu.pages[0], "MEOW",
+                _titleLabel = new MenuLabel(fancymenu, fancymenu.pages[0], "MEOW",
                     new Vector2(meowX, displayY), new Vector2(50f, 20f), false);
-                _fancyMenu.pages[0].subObjects.Add(_titleLabel);
+                fancymenu.pages[0].subObjects.Add(_titleLabel);
 
-                _prevButton = new SimpleButton(_fancyMenu, _fancyMenu.pages[0], "<", "MEOW_PREV",
+                _prevButton = new SimpleButton(fancymenu, fancymenu.pages[0], "<", "MEOW_PREV",
                     new Vector2(meowX, buttonsY), new Vector2(40f, 30f));
-                _fancyMenu.pages[0].subObjects.Add(_prevButton);
+                fancymenu.pages[0].subObjects.Add(_prevButton);
 
-                _nextButton = new SimpleButton(_fancyMenu, _fancyMenu.pages[0], ">", "MEOW_NEXT",
+                _nextButton = new SimpleButton(fancymenu, fancymenu.pages[0], ">", "MEOW_NEXT",
                     new Vector2(meowX + 45f, buttonsY), new Vector2(40f, 30f));
-                _fancyMenu.pages[0].subObjects.Add(_nextButton);
+                fancymenu.pages[0].subObjects.Add(_nextButton);
 
                 float labelWidth = Mathf.Clamp((rightEdge - 220f) - (meowX + 90f), 80f, 400f);
 
-                _meowLabel = new MenuLabel(_fancyMenu, _fancyMenu.pages[0], "",
+                _meowLabel = new MenuLabel(fancymenu, fancymenu.pages[0], "",
                     new Vector2(meowX + 90f, displayY), new Vector2(labelWidth, 20f), false);
-                _fancyMenu.pages[0].subObjects.Add(_meowLabel);
+                fancymenu.pages[0].subObjects.Add(_meowLabel);
 
-                _statusLabel = new MenuLabel(_fancyMenu, _fancyMenu.pages[0], "",
+                _statusLabel = new MenuLabel(fancymenu, fancymenu.pages[0], "",
                     new Vector2(meowX, statusY), new Vector2(labelWidth, 20f), false);
-                _fancyMenu.pages[0].subObjects.Add(_statusLabel);
+                fancymenu.pages[0].subObjects.Add(_statusLabel);
 
                 float sliderX = textBoxBorder.pos.x + 145f;
-                _volumeHost = new VolumeSliderHost(_fancyMenu, _fancyMenu.pages[0], this);
-                _fancyMenu.pages[0].subObjects.Add(_volumeHost);
+                _volumeHost = new VolumeSliderHost(fancymenu, fancymenu.pages[0], this);
+                fancymenu.pages[0].subObjects.Add(_volumeHost);
 
-                _volumeSlider = new VolumeSlider(_fancyMenu, _volumeHost,
+                _volumeSlider = new VolumeSlider(fancymenu, _volumeHost,
                     new Vector2(sliderX, buttonsY), new Vector2(150f, 30f));
                 _volumeHost.subObjects.Add(_volumeSlider);
-                _fancyMenu.pages[0].selectables.Remove(_volumeSlider);
+                fancymenu.pages[0].selectables.Remove(_volumeSlider);
 
-                _previewButton = new SimpleButton(_fancyMenu, _fancyMenu.pages[0], "PREVIEW", "MEOW_PREVIEW",
+                _previewButton = new SimpleButton(fancymenu, fancymenu.pages[0], "PREVIEW", "MEOW_PREVIEW",
                     new Vector2(rightEdge - 140f, buttonsY + 100f), new Vector2(130f, 30f));
-                _fancyMenu.pages[0].subObjects.Add(_previewButton);
+                fancymenu.pages[0].subObjects.Add(_previewButton);
 
                 _uiAdded = true;
-                _lastKnownSlugcat = _fancyMenu.selectedSlugcat;
+                _lastKnownSlugcat = fancymenu.selectedSlugcat;
                 _lastMeadowState = MeowFancyMenuUI.IsMeadowModeOn();
 
                 RefreshDisplay();
@@ -534,9 +510,11 @@ namespace MeowxMeadow
                 _volumeSlider.buttonBehav.greyedOut = !meadowOn;
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public void Tick()
         {
             if (!_uiAdded) return;
+            if (_fancyMenu is not FancyMenu fancymenu) return;
 
             try
             {
@@ -547,12 +525,12 @@ namespace MeowxMeadow
                 string currentSteamId = currentProfile > 0 ? MeowProfileManager.GetSteamID(currentProfile) : "";
 
                 if (meadowOn != _lastMeadowState ||
-                    _fancyMenu.selectedSlugcat != _lastKnownSlugcat ||
+                    fancymenu.selectedSlugcat != _lastKnownSlugcat ||
                     currentProfile != _lastKnownProfile ||
                     currentSteamId != _lastKnownSteamId)
                 {
                     _lastMeadowState = meadowOn;
-                    _lastKnownSlugcat = _fancyMenu.selectedSlugcat;
+                    _lastKnownSlugcat = fancymenu.selectedSlugcat;
                     _lastKnownProfile = currentProfile;
                     _lastKnownSteamId = currentSteamId;
                     RefreshDisplay();
@@ -572,8 +550,11 @@ namespace MeowxMeadow
             }
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public void HandleSignal(string message)
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return;
+
             if (message == "MEOW_PREVIEW")
             {
                 PreviewMeow();
@@ -582,11 +563,11 @@ namespace MeowxMeadow
 
             if (!MeowFancyMenuUI.IsMeadowModeOn())
             {
-                _fancyMenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
+                fancymenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
                 return;
             }
 
-            string currentSlugcat = _fancyMenu.selectedSlugcat;
+            string currentSlugcat = fancymenu.selectedSlugcat;
             List<MeowOption> currentOptions = MeowFancyMenuUI.GetOptionsForSlugcat(currentSlugcat);
             if (currentOptions == null || currentOptions.Count == 0) return;
 
@@ -596,8 +577,11 @@ namespace MeowxMeadow
             ApplySelectedOption();
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public void RefreshDisplay()
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return;
+
             try
             {
                 _pendingVolume = null;
@@ -611,7 +595,7 @@ namespace MeowxMeadow
                     return;
                 }
 
-                string currentSlugcat = _fancyMenu.selectedSlugcat;
+                string currentSlugcat = fancymenu.selectedSlugcat;
                 List<MeowOption> currentOptions = MeowFancyMenuUI.GetOptionsForSlugcat(currentSlugcat);
                 var dto = MeowProfileManager.GetProfileCustomMeow(profile, currentSlugcat);
 
@@ -642,20 +626,17 @@ namespace MeowxMeadow
 
             for (int i = 0; i < options.Count; i++)
             {
-                var opt = options[i];
-                if (string.Equals(opt.ShortMeowSoundId ?? "", dto.ShortMeowSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.LongMeowSoundId ?? "", dto.LongMeowSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.ShortMeowPupSoundId ?? "", dto.ShortMeowPupSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.LongMeowPupSoundId ?? "", dto.LongMeowPupSoundId ?? "", StringComparison.Ordinal))
-                {
+                if (dto.MatchesOption(options[i]))
                     return i;
-                }
             }
             return -1;
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private void ApplySelectedOption()
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return;
+
             try
             {
                 int profile = MeowProfileManager.GetCurrentProfileNumber();
@@ -665,7 +646,7 @@ namespace MeowxMeadow
                     return;
                 }
 
-                string currentSlugcat = _fancyMenu.selectedSlugcat;
+                string currentSlugcat = fancymenu.selectedSlugcat;
                 List<MeowOption> currentOptions = MeowFancyMenuUI.GetOptionsForSlugcat(currentSlugcat);
 
                 if (_currentIndex < 0 || _currentIndex >= currentOptions.Count)
@@ -674,15 +655,7 @@ namespace MeowxMeadow
                 }
 
                 var opt = currentOptions[_currentIndex];
-                var dto = new CustomMeowDto
-                {
-                    ShortMeowSoundId = opt.ShortMeowSoundId,
-                    LongMeowSoundId = opt.LongMeowSoundId,
-                    ShortMeowPupSoundId = opt.ShortMeowPupSoundId,
-                    LongMeowPupSoundId = opt.LongMeowPupSoundId,
-                    VolumeMultiplier = opt.VolumeMultiplier,
-                    LastUpdated = DateTime.Now
-                };
+                var dto = CustomMeowDto.FromOption(opt);
 
                 MeowProfileManager.SaveProfileOption(profile, currentSlugcat, dto);
                 _pendingVolume = null;
@@ -691,7 +664,7 @@ namespace MeowxMeadow
                 string steamId = MeowProfileManager.GetSteamID(profile);
                 _meowLabel.text = opt.Label;
                 _statusLabel.text = string.IsNullOrEmpty(steamId) ? $"Temp: {currentSlugcat} (set SteamID to save)" : $"Saved: {currentSlugcat} (profile {profile})";
-                _fancyMenu.PlaySound(SoundID.MENY_Already_Selected_MultipleChoice_Clicked);
+                fancymenu.PlaySound(SoundID.MENY_Already_Selected_MultipleChoice_Clicked);
             }
             catch (Exception ex)
             {
@@ -710,8 +683,10 @@ namespace MeowxMeadow
             UpdateVolumeLabel();
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public void CommitVolume()
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return;
             if (!_pendingVolume.HasValue) return;
 
             float volume = MeowVolumeManager.Normalize(_pendingVolume.Value);
@@ -726,7 +701,7 @@ namespace MeowxMeadow
                     return;
                 }
 
-                string slugcat = _fancyMenu.selectedSlugcat;
+                string slugcat = fancymenu.selectedSlugcat;
                 List<MeowOption> options = MeowFancyMenuUI.GetOptionsForSlugcat(slugcat);
                 if (options == null || options.Count == 0)
                 {
@@ -738,23 +713,10 @@ namespace MeowxMeadow
                 MeowOption opt = options[index];
                 CustomMeowDto dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcat);
 
-                bool matchesCurrentOption = dto != null &&
-                    string.Equals(opt.ShortMeowSoundId ?? "", dto.ShortMeowSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.LongMeowSoundId ?? "", dto.LongMeowSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.ShortMeowPupSoundId ?? "", dto.ShortMeowPupSoundId ?? "", StringComparison.Ordinal) &&
-                    string.Equals(opt.LongMeowPupSoundId ?? "", dto.LongMeowPupSoundId ?? "", StringComparison.Ordinal);
-
+                bool matchesCurrentOption = dto != null && dto.MatchesOption(opt);
                 if (!matchesCurrentOption)
                 {
-                    dto = new CustomMeowDto
-                    {
-                        ShortMeowSoundId = opt.ShortMeowSoundId,
-                        LongMeowSoundId = opt.LongMeowSoundId,
-                        ShortMeowPupSoundId = opt.ShortMeowPupSoundId,
-                        LongMeowPupSoundId = opt.LongMeowPupSoundId,
-                        VolumeMultiplier = opt.VolumeMultiplier,
-                        LastUpdated = DateTime.Now
-                    };
+                    dto = CustomMeowDto.FromOption(opt);
                 }
 
                 dto.VolumeMultiplier = volume;
@@ -770,18 +732,20 @@ namespace MeowxMeadow
             UpdateVolumeLabel();
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private float EffectiveVolume()
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return 1.0f;
             if (_pendingVolume.HasValue)
                 return MeowVolumeManager.Normalize(_pendingVolume.Value);
 
             int profile = MeowProfileManager.GetCurrentProfileNumber();
             if (profile > 0)
             {
-                return MeowVolumeManager.GetProfileVolume(profile, _fancyMenu.selectedSlugcat);
+                return MeowVolumeManager.GetProfileVolume(profile, fancymenu.selectedSlugcat);
             }
 
-            List<MeowOption> options = MeowFancyMenuUI.GetOptionsForSlugcat(_fancyMenu.selectedSlugcat);
+            List<MeowOption> options = MeowFancyMenuUI.GetOptionsForSlugcat(fancymenu.selectedSlugcat);
             if (options != null && options.Count > 0)
             {
                 int index = Mathf.Clamp(_currentIndex, 0, options.Count - 1);
@@ -798,30 +762,36 @@ namespace MeowxMeadow
             _volumeSlider.menuLabel.label.text = "VOLUME: " + percent + "%";
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private void PreviewMeow()
         {
-            List<SoundID> candidates = ResolvePreviewSound();
+            if (_fancyMenu is not FancyMenu fancymenu) return;
+
+            List <SoundID> candidates = ResolvePreviewSound();
             if (candidates == null || candidates.Count == 0)
             {
-                _fancyMenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
+                fancymenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
                 return;
             }
 
             SoundID soundId = candidates[UnityEngine.Random.Range(0, candidates.Count)];
             if (soundId == null)
             {
-                _fancyMenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
+                fancymenu.PlaySound(SoundID.MENU_Greyed_Out_Button_Clicked);
                 return;
             }
 
             float volume = MeowVolumeManager.GetPlaybackVolume(PushToMeowMain.ModSettings.MeowVolumeMultiplier.Value, EffectiveVolume()); ;
-            _fancyMenu.PlaySound(soundId, 0f, volume, 1f);
+            fancymenu.PlaySound(soundId, 0f, volume, 1f);
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private List<SoundID> ResolvePreviewSound()
         {
+            if (_fancyMenu is not FancyMenu fancymenu) return null;
+
             var results = new List<SoundID>();
-            string slugcatId = string.IsNullOrEmpty(_fancyMenu.selectedSlugcat) ? "White" : _fancyMenu.selectedSlugcat;
+            string slugcatId = string.IsNullOrEmpty(fancymenu.selectedSlugcat) ? "White" : fancymenu.selectedSlugcat;
             bool isPup = string.Equals(slugcatId, "Slugpup", StringComparison.Ordinal);
 
             CustomMeow? customMeow = null;
@@ -834,7 +804,7 @@ namespace MeowxMeadow
                     CustomMeowDto dto = MeowProfileManager.GetProfileCustomMeow(profile, slugcatId);
                     if (dto != null)
                     {
-                        customMeow = MeowProfileManager.ConvertDtoToCustomMeow(dto);
+                        customMeow = dto.ToCustomMeow();
                     }
                 }
             }
@@ -907,15 +877,57 @@ namespace MeowxMeadow
     public class MeowOption
     {
         public string Label;
-        public string ShortMeowSoundId = "";
-        public string LongMeowSoundId = "";
-        public string ShortMeowPupSoundId = "";
-        public string LongMeowPupSoundId = "";
+        public Dictionary<MeowSoundType, string> SoundIds { get; set; } = new Dictionary<MeowSoundType, string>();
         public float VolumeMultiplier = 1f;
+
+        public string GetSoundId(MeowSoundType type)
+        {
+            if (SoundIds != null && SoundIds.TryGetValue(type, out string soundId))
+                return soundId ?? string.Empty;
+
+            return string.Empty;
+        }
+
+        public void SetSoundId(MeowSoundType type, string soundId)
+        {
+            SoundIds ??= new Dictionary<MeowSoundType, string>();
+            SoundIds[type] = soundId ?? string.Empty;
+        }
 
         public static MeowOption CreateDefault()
         {
             return new MeowOption { Label = "(default)" };
+        }
+
+        public static MeowOption FromJson(string label, CustomMeowJson json)
+        {
+            var option = new MeowOption
+            {
+                Label = label,
+                VolumeMultiplier = MeowVolumeManager.Normalize(json.volume_multiplier)
+            };
+
+            option.SetSoundId(MeowSoundType.ShortMeowSoundId, json.short_meow_soundid);
+            option.SetSoundId(MeowSoundType.LongMeowSoundId, json.long_meow_soundid);
+            option.SetSoundId(MeowSoundType.ShortMeowPupSoundId, json.short_meow_pup_soundid);
+            option.SetSoundId(MeowSoundType.LongMeowPupSoundId, json.long_meow_pup_soundid);
+
+            return option;
+        }
+
+        public bool MatchesJson(CustomMeowJson json, bool isSlugpup)
+        {
+            if (json == null) return false;
+
+            bool normalMatches =
+                string.Equals(GetSoundId(MeowSoundType.ShortMeowSoundId), json.short_meow_soundid ?? "", StringComparison.Ordinal) &&
+                string.Equals(GetSoundId(MeowSoundType.LongMeowSoundId), json.long_meow_soundid ?? "", StringComparison.Ordinal);
+
+            if (!normalMatches) return false;
+            if (!isSlugpup) return true;
+
+            return string.Equals(GetSoundId(MeowSoundType.ShortMeowPupSoundId), json.short_meow_pup_soundid ?? "", StringComparison.Ordinal) &&
+                   string.Equals(GetSoundId(MeowSoundType.LongMeowPupSoundId), json.long_meow_pup_soundid ?? "", StringComparison.Ordinal);
         }
     }
 }

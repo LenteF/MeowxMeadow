@@ -1,5 +1,6 @@
 ﻿using DMSxMeadow;
 using MonoMod.RuntimeDetour;
+using Newtonsoft.Json;
 using PushToMeowMod;
 using System;
 using System.Collections.Generic;
@@ -10,6 +11,14 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
+    public enum MeowSoundType
+    {
+        ShortMeowSoundId,
+        LongMeowSoundId,
+        ShortMeowPupSoundId,
+        LongMeowPupSoundId
+    }
+
     [Serializable]
     public class MeowDatabase
     {
@@ -29,24 +38,149 @@ namespace MeowxMeadow
     [Serializable]
     public class CustomMeowDto
     {
-        public string ShortMeowSoundId;
-        public string LongMeowSoundId;
-        public string ShortMeowPupSoundId;
-        public string LongMeowPupSoundId;
+        public Dictionary<MeowSoundType, string> SoundIds { get; set; } = new Dictionary<MeowSoundType, string>();
+        
+        [JsonIgnore]
         public float VolumeMultiplier = 1.0f;
+
+        [JsonIgnore]
         public DateTime LastUpdated = DateTime.Now;
+
+        public static string SerializeLocalMeowDto(string slugcatName)
+        {
+            CustomMeowDto dto = Plugin.IsDmsxMeadowActive ? MeowProfileManager.GetCustomMeowDtoBySteamID(MeowSerializer.GetLocalSteamId(), slugcatName) : null;
+            dto ??= MeowUtils.CustomMeows.TryGetValue(slugcatName, out var fallbackMeow) ? FromCustomMeow(fallbackMeow) : new CustomMeowDto();
+
+            return JsonConvert.SerializeObject(dto, new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore
+            });
+        }
+
+        public static CustomMeowDto DeserializeToCustomMeowDto(string json)
+        {
+            var dto = JsonConvert.DeserializeObject<CustomMeowDto>(json);
+            if (dto == null) return null;
+            return dto;
+        }
+
+        public string GetSoundId(MeowSoundType type)
+        {
+            if (SoundIds != null && SoundIds.TryGetValue(type, out string soundId))
+                return soundId;
+            return string.Empty;
+        }
+
+        public void SetSoundId(MeowSoundType type, string soundId)
+        {
+            SoundIds ??= new Dictionary<MeowSoundType, string>();
+            SoundIds[type] = soundId ?? string.Empty;
+        }
+
+        public bool MatchesSounds(CustomMeowDto other)
+        {
+            if (other == null) return false;
+
+            foreach (MeowSoundType type in Enum.GetValues(typeof(MeowSoundType)))
+            {
+                if (!string.Equals(GetSoundId(type), other.GetSoundId(type), StringComparison.Ordinal))
+                    return false;
+            }
+
+            return true;
+        }
+
+        public bool MatchesOption(MeowOption option)
+        {
+            if (option == null) return false;
+
+            foreach (MeowSoundType type in Enum.GetValues(typeof(MeowSoundType)))
+            {
+                if (!string.Equals(GetSoundId(type), option.GetSoundId(type), StringComparison.Ordinal))
+                    return false;
+            }
+
+            return true;
+        }
+
+        public static CustomMeowDto FromOption(MeowOption option, float? volumeOverride = null)
+        {
+            var dto = new CustomMeowDto
+            {
+                VolumeMultiplier = volumeOverride ?? (option?.VolumeMultiplier ?? 1.0f),
+                LastUpdated = DateTime.Now
+            };
+
+            if (option != null)
+            {
+                foreach (MeowSoundType type in Enum.GetValues(typeof(MeowSoundType)))
+                {
+                    dto.SetSoundId(type, option.GetSoundId(type));
+                }
+            }
+
+            return dto;
+        }
+
+        public static CustomMeowDto FromCustomMeow(CustomMeow meow)
+        {
+            var dto = new CustomMeowDto
+            {
+                VolumeMultiplier = meow.VolumeMultiplier,
+                LastUpdated = DateTime.Now
+            };
+
+            dto.SetSoundId(MeowSoundType.ShortMeowSoundId, meow.ShortMeowSoundID?.value);
+            dto.SetSoundId(MeowSoundType.LongMeowSoundId, meow.LongMeowSoundID?.value);
+            dto.SetSoundId(MeowSoundType.ShortMeowPupSoundId, meow.ShortMeowPupSoundID?.value);
+            dto.SetSoundId(MeowSoundType.LongMeowPupSoundId, meow.LongMeowPupSoundID?.value);
+
+            return dto;
+        }
+
+        public CustomMeow ToCustomMeow()
+        {
+            return new CustomMeow
+            {
+                VolumeMultiplier = this.VolumeMultiplier,
+                ShortMeowSoundID = MeowProfileManager.ResolveSoundId(GetSoundId(MeowSoundType.ShortMeowSoundId)),
+                LongMeowSoundID = MeowProfileManager.ResolveSoundId(GetSoundId(MeowSoundType.LongMeowSoundId)),
+                ShortMeowPupSoundID = MeowProfileManager.ResolveSoundId(GetSoundId(MeowSoundType.ShortMeowPupSoundId)),
+                LongMeowPupSoundID = MeowProfileManager.ResolveSoundId(GetSoundId(MeowSoundType.LongMeowPupSoundId))
+            };
+        }
 
         public CustomMeowDto Copy()
         {
-            return new CustomMeowDto
+            var copy = new CustomMeowDto
             {
-                ShortMeowSoundId = this.ShortMeowSoundId,
-                LongMeowSoundId = this.LongMeowSoundId,
-                ShortMeowPupSoundId = this.ShortMeowPupSoundId,
-                LongMeowPupSoundId = this.LongMeowPupSoundId,
                 VolumeMultiplier = this.VolumeMultiplier,
                 LastUpdated = DateTime.Now
             };
+
+            foreach (MeowSoundType type in Enum.GetValues(typeof(MeowSoundType)))
+            {
+                copy.SetSoundId(type, GetSoundId(type));
+            }
+
+            return copy;
+        }
+
+        public float ResolveDefaultVolumeMultiplier(string slugcatName)
+        {
+            var options = MeowFancyMenuUI.GetOptionsForSlugcat(slugcatName);
+            if (options != null)
+            {
+                foreach (var opt in options)
+                {
+                    if (opt != null && MatchesOption(opt))
+                    {
+                        return MeowVolumeManager.Normalize(opt.VolumeMultiplier);
+                    }
+                }
+            }
+
+            return 1.0f;
         }
     }
 
@@ -372,13 +506,10 @@ namespace MeowxMeadow
         // ============================================================
         // OPERACIONES CON ASIGNACIONES SteamID
         // ============================================================
-        private static CustomMeowDto GetCustomMeowDtoBySteamID(string steamId, string slugcatName)
+        public static CustomMeowDto GetCustomMeowDtoBySteamID(string steamId, string slugcatName)
         {
             if (string.IsNullOrEmpty(steamId) || string.IsNullOrEmpty(slugcatName))
                 return null;
-
-            if (slugcatName == "MeadowOnline")
-                slugcatName = "White";
 
             int profileNumber = GetProfileBySteamID(steamId);
             if (profileNumber < 0)
@@ -457,20 +588,7 @@ namespace MeowxMeadow
         // ============================================================
         // CONVERSIÓN Y RESOLUCIÓN DE SONIDOS
         // ============================================================
-        public static CustomMeow ConvertDtoToCustomMeow(CustomMeowDto dto)
-        {
-            CustomMeow custom = new CustomMeow();
-
-            custom.VolumeMultiplier = dto.VolumeMultiplier;
-            custom.ShortMeowSoundID = ResolveSoundId(dto.ShortMeowSoundId);
-            custom.LongMeowSoundID = ResolveSoundId(dto.LongMeowSoundId);
-            custom.ShortMeowPupSoundID = ResolveSoundId(dto.ShortMeowPupSoundId);
-            custom.LongMeowPupSoundID = ResolveSoundId(dto.LongMeowPupSoundId);
-
-            return custom;
-        }
-
-        private static SoundID ResolveSoundId(string soundName)
+        public static SoundID ResolveSoundId(string soundName)
         {
             if (string.IsNullOrEmpty(soundName))
                 return null;
@@ -481,27 +599,34 @@ namespace MeowxMeadow
             return null;
         }
 
-        private static CustomMeow? GetMeowPackageBySteamID(string steamId, string slugcatName)
-        {
-            CustomMeowDto dto = GetCustomMeowDtoBySteamID(steamId, slugcatName);
-            if (dto == null) return null;
-
-            return ConvertDtoToCustomMeow(dto);
-        }
-
         private static (SoundID meowSoundID, float pitch, float volume) MeowUtils_FindMeowSoundID(Func<Player, bool, (SoundID, float, float)> orig, Player self, bool isShortMeow)
         {
             if (Plugin.Instance.OnlinePlayerToKeyLookup.TryGetValue(self, out string steamId) && !string.IsNullOrEmpty(steamId))
             {
                 string slugcatName = self.SlugCatClass.value;
 
-                CustomMeow? customMeow = null;
-                if (Plugin.IsDmsxMeadowActive)
-                    customMeow = GetMeowPackageBySteamID(steamId, slugcatName);
-
-                if (customMeow.HasValue)
+                CustomMeowDto dto = null;
+                if (!string.IsNullOrEmpty(slugcatName))
                 {
-                    var meow = customMeow.Value;
+                    if (slugcatName == "MeadowOnline")
+                    {
+                        slugcatName = "White";
+                    }
+
+                    if (Plugin.IsDmsxMeadowActive)
+                    {
+                        dto = GetCustomMeowDtoBySteamID(steamId, slugcatName);
+                    }
+
+                    if (dto == null)
+                    {
+                        dto = MeowSerializer.GetReceivedCustomMeow(steamId, slugcatName);
+                    }
+                }
+
+                if (dto != null)
+                {
+                    var meow = dto.ToCustomMeow();
                     bool isPup = self.playerState.isPup;
                     float pitch = isPup ? 1.3f : 1f;
                     float volume = MeowVolumeManager.GetPlaybackVolume(PushToMeowMain.ModSettings.MeowVolumeMultiplier.Value, meow.VolumeMultiplier);

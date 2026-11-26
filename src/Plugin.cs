@@ -1,5 +1,6 @@
 ﻿using BepInEx;
 using BepInEx.Logging;
+using DMSxMeadow;
 using MonoMod.RuntimeDetour;
 using PushToMeowMod;
 using RainMeadow;
@@ -10,7 +11,7 @@ using UnityEngine;
 
 namespace MeowxMeadow
 {
-    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.3.0")]
+    [BepInPlugin("meowxmeadow", "MeowxMeadow", "2.4.0")]
     [BepInDependency("henpemaz.rainmeadow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("pushtomeow", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("dressmyslugcat", BepInDependency.DependencyFlags.SoftDependency)]
@@ -27,6 +28,7 @@ namespace MeowxMeadow
         public Dictionary<string, Player> OnlinePlayersLookup = new Dictionary<string, Player>();
         public Dictionary<Player, string> OnlinePlayerToKeyLookup = new Dictionary<Player, string>();
 
+        private Hook HandleJoinHook;
         private Hook HandleDisconnectHook;
         private Hook LeaveLobbyHook;
         private Hook UpdateHook;
@@ -47,6 +49,8 @@ namespace MeowxMeadow
             try
             {
                 On.RainWorld.OnModsInit += OnModsInit;
+                On.RainWorld.Update += RainWorld_Update;
+                On.ProcessManager.PostSwitchMainProcess += ProcessManager_PostSwitchMainProcess;
             }
             catch (Exception ex)
             {
@@ -64,7 +68,7 @@ namespace MeowxMeadow
                 if (isInit) return;
                 isInit = true;
 
-                Logger.LogInfo("Build 2.3.0 (22/11/2026: Limpieza dinámica de diccionarios). Si NO ves esta línea, se está cargando un DLL viejo.");
+                Logger.LogInfo("Build 2.4.0 (26/11/2026: Impleentado envío y solucitud P2P de handshake y resolución por MeowUtils_FindMeowSoundID, añadida la estructura base de MeowRegistration para futuros remaps de sound ID y limpieza de memoria y desacoplamiento total de Dress My Slugcat y DMSxMeadow en MeowFancyMenuUI y MeowProfileManager cuando los mods opcionales no están presentes). Si NO ves esta línea, se está cargando un DLL viejo.");
                 
                 if (IsDmsxMeadowActive)
                 {
@@ -87,6 +91,13 @@ namespace MeowxMeadow
         {
             try
             {
+                On.RoomCamera.SpriteLeaser.ctor += SpriteLeaser_Ctor_Hook;
+
+                MethodInfo joinMethod = typeof(MatchmakingManager).GetMethod("HandleJoin", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo joinHook = typeof(Plugin).GetMethod("MatchmakingManager_HandleJoin", BindingFlags.NonPublic | BindingFlags.Static);
+                if (joinMethod != null && joinHook != null)
+                    this.HandleJoinHook = new Hook(joinMethod, joinHook);
+
                 MatchmakingManager.OnLobbyJoined += MatchmakingManager_OnLobbyJoined;
 
                 MethodInfo disconnectMethod = typeof(MatchmakingManager).GetMethod("HandleDisconnect", BindingFlags.Public | BindingFlags.Instance);
@@ -130,6 +141,202 @@ namespace MeowxMeadow
             }
         }
 
+        // ===================================================================
+        // RESOLUCIÓN DEL SLUGCAT LOCAL SEGÚN EL CONTEXTO
+        // ===================================================================
+        private static string LastEmittedLobbySlugcat = null;
+        private static bool _handshakeReemitPending;
+        public static void RequestHandshakeReemit() => _handshakeReemitPending = true;
+        private static bool MeadowInterfaceActive = false;
+        private static bool RandomSlugcatSkipLogged = false;
+
+        private static bool IsMeadowInterfaceProcessId(ProcessManager.ProcessID id)
+        {
+            return id == RainMeadow.RainMeadow.Ext_ProcessID.MeadowMenu
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.LobbySelectMenu
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.LobbyCreateMenu
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.ArenaLobbyMenu
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.StoryMenu
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.SpectatorMode
+                || id == RainMeadow.RainMeadow.Ext_ProcessID.OnlineManager;
+        }
+
+        private static void ProcessManager_PostSwitchMainProcess(On.ProcessManager.orig_PostSwitchMainProcess orig, ProcessManager self, ProcessManager.ProcessID ID)
+        {
+            orig(self, ID);
+
+            try
+            {
+                bool newIsInterface = IsMeadowInterfaceProcessId(ID);
+                if (newIsInterface && !MeadowInterfaceActive)
+                {
+                    MeadowInterfaceActive = true;
+                    bool lobbyActive = OnlineManager.lobby != null && OnlineManager.lobby.isAvailable;
+                    var (lobbySlugcat, lobbyMode) = lobbyActive ? ResolveLocalSlugcatName() : (null, null);
+                    return;
+                }
+
+                if (!newIsInterface && MeadowInterfaceActive)
+                {
+                    MeadowInterfaceActive = false;
+                    LastEmittedLobbySlugcat = null;
+
+                    if (ID == ProcessManager.ProcessID.Game)
+                    {
+                    }
+                    else if (ID == ProcessManager.ProcessID.MainMenu)
+                    {
+                        MeowRegistration.WipeAllMemory();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Hook error (PostSwitchMainProcess): {ex.Message}");
+            }
+        }
+
+        internal static (string Slugcat, string Mode) ResolveLocalSlugcatName()
+        {
+            var currentMainLoop = RWCustom.Custom.rainWorld?.processManager?.currentMainLoop;
+
+            if (currentMainLoop is RainWorldGame rainWorldGame)
+            {
+                string realized = rainWorldGame.FirstRealizedPlayer?.slugcatStats.name.value;
+                return (realized, realized == null ? null : "partida");
+            }
+
+            if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return (null, null);
+
+            if (OnlineManager.lobby.gameMode is ArenaOnlineGameMode)
+            {
+                var playingAs = ArenaHelpers.GetArenaClientSettings(OnlineManager.mePlayer)?.playingAs;
+                if (playingAs == null || playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineRandomSlugcat || playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineOverseerSpectator)
+                {
+                    if (playingAs == RainMeadow.RainMeadow.Ext_SlugcatStatsName.OnlineRandomSlugcat && !RandomSlugcatSkipLogged)
+                    {
+                        RandomSlugcatSkipLogged = true;
+                    }
+                    return (null, "arena");
+                }
+                return (playingAs.value, "arena");
+            }
+
+            if (OnlineManager.lobby.gameMode is StoryGameMode storyGameMode)
+            {
+                string slugcat = storyGameMode.preferredSlug?.value ?? storyGameMode.currentCampaign?.value;
+                return (slugcat, "historia");
+            }
+
+            return (null, null);
+        }
+
+        private void RainWorld_Update(On.RainWorld.orig_Update orig, RainWorld self)
+        {
+            orig(self);
+
+            try
+            {
+                if (_handshakeReemitPending)
+                {
+                    _handshakeReemitPending = false;
+                    if (OnlineManager.lobby != null && OnlineManager.lobby.isAvailable)
+                    {
+                        var (slugcat, _) = ResolveLocalSlugcatName();
+                        if (!string.IsNullOrEmpty(slugcat))
+                        {
+                            LastEmittedLobbySlugcat = slugcat;
+                            // TODO: MeowTransfer.AbortAllOutgoing();
+                            MeowSerializer.BroadcastHandshake(slugcat);
+                        }
+                    }
+                }
+
+                if (OnlineManager.lobby != null && OnlineManager.lobby.isAvailable)
+                {
+                    if (RWCustom.Custom.rainWorld?.processManager?.currentMainLoop is not RainWorldGame)
+                    {
+                        var (lobbySlugcat, _) = ResolveLocalSlugcatName();
+                        if (!string.IsNullOrEmpty(lobbySlugcat))
+                        {
+                            if (lobbySlugcat != LastEmittedLobbySlugcat)
+                            {
+                                LastEmittedLobbySlugcat = lobbySlugcat;
+                                // TODO: MeowTransfer.AbortAllOutgoing();
+                                MeowSerializer.BroadcastHandshake(lobbySlugcat);
+                            }
+                        }
+                        else
+                        {
+                            LastEmittedLobbySlugcat = null;
+                        }
+                    }
+                }
+                else
+                {
+                    LastEmittedLobbySlugcat = null;
+                }
+
+                MeowSerializer.PollMissingHandshakes();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error en RainWorld_Update (SkinTransfer): {ex.Message}");
+            }
+        }
+
+        private static void SpriteLeaser_Ctor_Hook(On.RoomCamera.SpriteLeaser.orig_ctor orig, RoomCamera.SpriteLeaser sLeaser, IDrawable obj, RoomCamera rCam)
+        {
+            orig(sLeaser, obj, rCam);
+
+            try
+            {
+                if (obj is not PlayerGraphics playerGraphics) return;
+                if (playerGraphics?.player == null) return;
+
+                var onlineEntity = playerGraphics.player.abstractCreature.GetOnlineObject();
+                var diagP = playerGraphics.player;
+                Logger.LogInfo($"[DIAG/SLeaser] graphics for slugcat={diagP.slugcatStats.name.value} pup={diagP.isSlugpup} npc={diagP.isNPC} onBack={(diagP.onBack != null ? diagP.onBack.slugcatStats?.name?.value ?? "unknown" : "null")} online={(onlineEntity != null ? (onlineEntity.isMine ? "isMine" : "remote") : "null")}");
+
+                if (onlineEntity == null || !onlineEntity.isMine) return;
+                if (diagP.isNPC) return;
+
+                if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return;
+
+                string slugcatName = playerGraphics.player.slugcatStats.name.value;
+                Logger.LogInfo($"[DIAG/SLeaser] EMIT handshake slugcat={slugcatName}");
+                MeowSerializer.BroadcastHandshake(slugcatName);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Hook error (SpriteLeaser_ctor): {ex.Message}");
+            }
+        }
+
+        private static void MatchmakingManager_HandleJoin(
+            Action<MatchmakingManager, OnlinePlayer> orig,
+            MatchmakingManager self,
+            OnlinePlayer player)
+        {
+            orig(self, player);
+
+            try
+            {
+                if (player == null || player.isMe) return;
+                if (OnlineManager.lobby == null || !OnlineManager.lobby.isAvailable) return;
+
+                var (slugcatName, mode) = ResolveLocalSlugcatName();
+                if (string.IsNullOrEmpty(slugcatName)) return;
+
+                LastEmittedLobbySlugcat = slugcatName;
+                MeowSerializer.BroadcastHandshake(slugcatName);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Hook error (HandleJoin): {ex.Message}");
+            }
+        }
+
         private static void MatchmakingManager_OnLobbyJoined(bool ok, string error)
         {
             if (!ok || OnlineManager.mePlayer == OnlineManager.lobby.owner)
@@ -156,6 +363,7 @@ namespace MeowxMeadow
                 if (string.IsNullOrEmpty(steamId)) return;
 
                 Instance.RemoveOnlinePlayerState(steamId);
+                MeowSerializer.ForgetPlayer(steamId);
             }
             catch (Exception ex)
             {
@@ -173,6 +381,7 @@ namespace MeowxMeadow
             try
             {
                 Instance?.ClearAllOnlinePlayerStates();
+                MeowSerializer.ForgetAllPlayers();
                 MeowxMeadowOptions.Instance?.RestoreLocalState();
             }
             catch (Exception ex)
@@ -331,13 +540,19 @@ namespace MeowxMeadow
         public void OnDestroy()
         {
             On.RainWorld.OnModsInit -= OnModsInit;
+            On.RainWorld.Update -= RainWorld_Update;
+            On.ProcessManager.PostSwitchMainProcess -= ProcessManager_PostSwitchMainProcess;
+            On.RoomCamera.SpriteLeaser.ctor -= SpriteLeaser_Ctor_Hook;
             MatchmakingManager.OnLobbyJoined -= MatchmakingManager_OnLobbyJoined;
 
             ClearAllOnlinePlayerStates();
+            MeowSerializer.ForgetAllPlayers();
 
             MeowFancyMenuUI.Dispose();
             MeowProfileManager.Dispose();
 
+            HandleJoinHook?.Dispose();
+            HandleDisconnectHook?.Dispose();
             LeaveLobbyHook?.Dispose();
             UpdateHook?.Dispose();
             HandleMeowInputHook?.Dispose();
